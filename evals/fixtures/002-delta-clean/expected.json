@@ -1,0 +1,6 @@
+{
+  "fixture": "002-delta-clean",
+  "exit": "ok",
+  "min_findings": 0,
+  "max_findings": 0
+}

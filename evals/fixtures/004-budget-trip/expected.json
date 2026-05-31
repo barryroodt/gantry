@@ -1,0 +1,5 @@
+{
+  "fixture": "004-budget-trip",
+  "exit": "budget",
+  "max_tokens": 50000
+}

@@ -1,0 +1,8 @@
+# Rust build artifacts
+/target/
+
+# Backtraces
+*.bt
+
+# Environment overrides
+.env

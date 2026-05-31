@@ -1,0 +1,5 @@
+{
+  "fixture": "003-team-mode-multi-dir",
+  "exit": "ok",
+  "min_findings": 1
+}
