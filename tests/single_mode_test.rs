@@ -132,6 +132,7 @@ fn test_validated(workdir: &TempDir, prompt_file: &std::path::Path) -> Validated
         inject_skills: vec![],
         system_prompt: None,
         subagent_system_prompt: None,
+        tools: vec![],
     }
 }
 
@@ -157,7 +158,7 @@ async fn run_mode(
         validated,
         meter,
         cancel,
-        registry: ToolRegistry::new(dir.path().to_path_buf()),
+        registry: ToolRegistry::new(dir.path().to_path_buf(), vec![]),
         skill_loader: SkillLoader::new(dir.path().to_path_buf()),
         provider,
         prompt: "review this code".into(),
@@ -306,7 +307,7 @@ async fn single_mode_uses_supplied_system_prompt() {
         validated,
         meter,
         cancel,
-        registry: ToolRegistry::new(dir.path().to_path_buf()),
+        registry: ToolRegistry::new(dir.path().to_path_buf(), vec![]),
         skill_loader: SkillLoader::new(dir.path().to_path_buf()),
         provider: Box::new(provider),
         prompt: "do the task".into(),
@@ -347,7 +348,7 @@ async fn single_mode_default_system_prompt_when_none() {
         validated,
         meter,
         cancel,
-        registry: ToolRegistry::new(dir.path().to_path_buf()),
+        registry: ToolRegistry::new(dir.path().to_path_buf(), vec![]),
         skill_loader: SkillLoader::new(dir.path().to_path_buf()),
         provider: Box::new(provider),
         prompt: "do the task".into(),

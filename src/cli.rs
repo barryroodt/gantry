@@ -41,6 +41,11 @@ pub struct Cli {
     /// read from this file. If omitted, a minimal neutral default is used.
     #[arg(long = "subagent-system-file", value_name = "PATH")]
     pub subagent_system_file: Option<PathBuf>,
+
+    /// Restrict the tools exposed to the agent (repeatable). Default: all tools
+    /// available for the selected mode. Each name must be valid for the mode.
+    #[arg(long = "tool", value_name = "NAME")]
+    pub tools: Vec<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, ValueEnum)]
@@ -124,6 +129,8 @@ pub enum ConfigError {
 
     #[error("system file is not readable: {}", .0.display())]
     SystemFileNotReadable(PathBuf),
+    #[error("unknown tool '{name}' (available for mode: {available})")]
+    UnknownTool { name: String, available: String },
 }
 
 impl From<clap::Error> for ConfigError {
@@ -145,6 +152,7 @@ pub struct Validated {
     pub inject_skills: Vec<String>,
     pub system_prompt: Option<String>,
     pub subagent_system_prompt: Option<String>,
+    pub tools: Vec<String>,
 }
 
 impl Cli {
@@ -179,6 +187,15 @@ impl Cli {
         let system_prompt = read_optional_system_file(self.system_file.as_deref())?;
         let subagent_system_prompt =
             read_optional_system_file(self.subagent_system_file.as_deref())?;
+        let available = crate::tools::registry::available_tool_names(self.mode == Mode::Team);
+        for tool in &self.tools {
+            if !available.contains(&tool.as_str()) {
+                return Err(ConfigError::UnknownTool {
+                    name: tool.clone(),
+                    available: available.join(", "),
+                });
+            }
+        }
         Ok(Validated {
             mode: self.mode,
             model,
@@ -190,6 +207,7 @@ impl Cli {
             inject_skills: self.inject_skills,
             system_prompt,
             subagent_system_prompt,
+            tools: self.tools,
         })
     }
 

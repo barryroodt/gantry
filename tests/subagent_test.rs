@@ -108,6 +108,7 @@ async fn spawn_reviewer_adds_to_roster_and_emits_subagent_spawn() {
         provider,
         "reviewer system".into(),
         test_meter(),
+        vec![],
     );
 
     let out = registry
@@ -137,7 +138,7 @@ async fn spawn_reviewer_adds_to_roster_and_emits_subagent_spawn() {
 #[tokio::test]
 async fn team_registry_exposes_nine_tools_single_mode_exposes_six() {
     let dir = TempDir::new().unwrap();
-    let single = ToolRegistry::new(dir.path().to_path_buf());
+    let single = ToolRegistry::new(dir.path().to_path_buf(), vec![]);
     assert_eq!(single.schemas().len(), 6);
     assert!(!single.schemas().iter().any(|s| s.name == "spawn_reviewer"));
 
@@ -149,6 +150,7 @@ async fn team_registry_exposes_nine_tools_single_mode_exposes_six() {
         provider,
         "template".into(),
         test_meter(),
+        vec![],
     );
     assert_eq!(team.schemas().len(), 9);
     let schemas = team.schemas();
@@ -179,6 +181,7 @@ async fn broadcast_summary_delivers_to_all_spawned_reviewers() {
         provider,
         "reviewer system".into(),
         test_meter(),
+        vec![],
     );
 
     registry
@@ -240,6 +243,7 @@ async fn collect_findings_drains_text_from_finished_reviewers_in_order() {
         provider,
         "reviewer system".into(),
         test_meter(),
+        vec![],
     );
 
     registry
@@ -289,6 +293,7 @@ async fn partial_failure_one_reviewer_panics_broadcast_and_collect_still_work() 
         provider,
         "reviewer system".into(),
         test_meter(),
+        vec![],
     );
 
     registry
@@ -336,7 +341,7 @@ async fn partial_failure_one_reviewer_panics_broadcast_and_collect_still_work() 
 
 #[tokio::test]
 async fn single_mode_rejects_subagent_tools() {
-    let registry = ToolRegistry::new(std::env::temp_dir());
+    let registry = ToolRegistry::new(std::env::temp_dir(), vec![]);
     let out = registry
         .dispatch(
             "coordinator",

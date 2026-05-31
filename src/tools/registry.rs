@@ -7,6 +7,28 @@ use crate::provider::{ProviderAdapter, ToolSchema};
 use std::path::PathBuf;
 use std::sync::{Arc, Weak};
 
+/// Tool names available in single mode (and the base set in team mode).
+pub const BASE_TOOL_NAMES: &[&str] = &[
+    "read_file",
+    "list_files",
+    "find_files",
+    "git_diff",
+    "shell",
+    "skill_load",
+];
+
+/// Tool names available only in team mode (coordinator subagent tools).
+pub const TEAM_TOOL_NAMES: &[&str] = &["spawn_reviewer", "collect_findings", "broadcast_summary"];
+
+/// Tool names exposed for the selected mode: base, plus team tools when `team`.
+pub fn available_tool_names(team: bool) -> Vec<&'static str> {
+    let mut names: Vec<&'static str> = BASE_TOOL_NAMES.to_vec();
+    if team {
+        names.extend_from_slice(TEAM_TOOL_NAMES);
+    }
+    names
+}
+
 struct TeamTools {
     roster: Arc<subagent::ReviewerRoster>,
     provider: Arc<dyn ProviderAdapter>,
@@ -19,13 +41,15 @@ struct TeamTools {
 pub struct ToolRegistry {
     workdir: PathBuf,
     team: Option<TeamTools>,
+    allow: Vec<String>,
 }
 
 impl ToolRegistry {
-    pub fn new(workdir: PathBuf) -> Self {
+    pub fn new(workdir: PathBuf, allow: Vec<String>) -> Self {
         Self {
             workdir,
             team: None,
+            allow,
         }
     }
 
@@ -36,6 +60,7 @@ impl ToolRegistry {
         provider: Arc<dyn ProviderAdapter>,
         reviewer_system_template: String,
         meter: Arc<TokenMeter>,
+        allow: Vec<String>,
     ) -> Arc<Self> {
         Arc::new_cyclic(|weak| Self {
             workdir,
@@ -46,6 +71,7 @@ impl ToolRegistry {
                 meter,
                 registry: weak.clone(),
             }),
+            allow,
         })
     }
 
@@ -133,6 +159,9 @@ impl ToolRegistry {
         if self.team.is_some() {
             schemas.extend(Self::team_schemas());
         }
+        if !self.allow.is_empty() {
+            schemas.retain(|s| self.allow.iter().any(|t| t == &s.name));
+        }
         schemas
     }
 
@@ -195,6 +224,9 @@ impl ToolRegistry {
     }
 
     async fn dispatch_inner(&self, name: &str, args_json: &str) -> Result<ToolOutput, ToolError> {
+        if !self.allow.is_empty() && !self.allow.iter().any(|t| t == name) {
+            return Err(ToolError::UnknownTool(name.to_string()));
+        }
         match name {
             "read_file" => {
                 let args: read_file::ReadFileArgs = serde_json::from_str(args_json)

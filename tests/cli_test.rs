@@ -27,6 +27,7 @@ fn base_cli(workdir: &Path, prompt_file: &Path) -> Cli {
         inject_skills: vec![],
         system_file: None,
         subagent_system_file: None,
+        tools: vec![],
     }
 }
 
@@ -383,4 +384,147 @@ fn system_prompt_default_none_when_flag_absent() {
 
     assert!(validated.system_prompt.is_none());
     assert!(validated.subagent_system_prompt.is_none());
+}
+
+#[test]
+fn parses_repeated_tool_flags() {
+    let workdir = temp_workdir("tool-allowlist");
+    let prompt = write_prompt_file(&workdir, "prompt.txt", "hello");
+
+    let validated = Cli::parse_and_validate_from([
+        "gantry",
+        "--mode",
+        "single",
+        "--model",
+        "openai/gpt-4o",
+        "--workdir",
+        workdir.to_str().unwrap(),
+        "--prompt-file",
+        prompt.to_str().unwrap(),
+        "--max-tokens",
+        "8192",
+        "--timeout-ms",
+        "60000",
+        "--tool",
+        "read_file",
+        "--tool",
+        "git_diff",
+    ])
+    .expect("parse_and_validate");
+
+    assert_eq!(validated.tools, ["read_file", "git_diff"]);
+}
+
+#[test]
+fn unknown_tool_returns_config_error() {
+    let workdir = temp_workdir("tool-unknown");
+    let prompt = write_prompt_file(&workdir, "prompt.txt", "hello");
+
+    let err = Cli::parse_and_validate_from([
+        "gantry",
+        "--mode",
+        "single",
+        "--model",
+        "openai/gpt-4o",
+        "--workdir",
+        workdir.to_str().unwrap(),
+        "--prompt-file",
+        prompt.to_str().unwrap(),
+        "--max-tokens",
+        "8192",
+        "--timeout-ms",
+        "60000",
+        "--tool",
+        "bogus_tool",
+    ])
+    .unwrap_err();
+
+    assert!(
+        matches!(err, ConfigError::UnknownTool { .. }),
+        "got {err:?}"
+    );
+}
+
+#[test]
+fn team_tool_rejected_in_single_mode() {
+    let workdir = temp_workdir("tool-team-in-single");
+    let prompt = write_prompt_file(&workdir, "prompt.txt", "hello");
+
+    let err = Cli::parse_and_validate_from([
+        "gantry",
+        "--mode",
+        "single",
+        "--model",
+        "openai/gpt-4o",
+        "--workdir",
+        workdir.to_str().unwrap(),
+        "--prompt-file",
+        prompt.to_str().unwrap(),
+        "--max-tokens",
+        "8192",
+        "--timeout-ms",
+        "60000",
+        "--tool",
+        "spawn_reviewer",
+    ])
+    .unwrap_err();
+
+    assert!(
+        matches!(err, ConfigError::UnknownTool { .. }),
+        "got {err:?}"
+    );
+}
+
+#[test]
+fn team_tool_allowed_in_team_mode() {
+    let workdir = temp_workdir("tool-team-in-team");
+    let prompt = write_prompt_file(&workdir, "prompt.txt", "hello");
+
+    let validated = Cli::parse_and_validate_from([
+        "gantry",
+        "--mode",
+        "team",
+        "--model",
+        "openai/gpt-4o",
+        "--workdir",
+        workdir.to_str().unwrap(),
+        "--prompt-file",
+        prompt.to_str().unwrap(),
+        "--max-tokens",
+        "8192",
+        "--timeout-ms",
+        "60000",
+        "--tool",
+        "spawn_reviewer",
+        "--tool",
+        "read_file",
+    ])
+    .expect("parse_and_validate");
+
+    assert_eq!(validated.tools, ["spawn_reviewer", "read_file"]);
+}
+
+#[test]
+fn tools_default_empty_when_flag_absent() {
+    let workdir = temp_workdir("tool-default");
+    let prompt = write_prompt_file(&workdir, "prompt.txt", "hello");
+
+    let validated = Cli::parse_and_validate_from([
+        "gantry",
+        "--mode",
+        "single",
+        "--model",
+        "openai/gpt-4o",
+        "--workdir",
+        workdir.to_str().unwrap(),
+        "--prompt-file",
+        prompt.to_str().unwrap(),
+        "--max-tokens",
+        "8192",
+        "--timeout-ms",
+        "60000",
+    ])
+    .expect("parse_and_validate");
+
+    assert!(validated.tools.is_empty());
 }

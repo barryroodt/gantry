@@ -221,6 +221,7 @@ pub async fn run_team(validated: Validated) -> ModeRunOutcome {
             .clone()
             .unwrap_or_else(|| crate::mode::DEFAULT_SUBAGENT_SYSTEM.to_string()),
         meter.clone(),
+        validated.tools.clone(),
     );
     let skill_loader = SkillLoader::new(validated.workdir.clone());
 

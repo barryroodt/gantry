@@ -126,6 +126,7 @@ fn test_validated(workdir: &TempDir, prompt_file: &std::path::Path) -> Validated
         inject_skills: vec![],
         system_prompt: None,
         subagent_system_prompt: None,
+        tools: vec![],
     }
 }
 
@@ -153,6 +154,7 @@ async fn run_team_mode(
         provider.clone(),
         "reviewer system".into(),
         meter.clone(),
+        vec![],
     );
 
     TeamMode {
@@ -349,6 +351,7 @@ async fn team_mode_budget_trip_during_reviewer_round() {
         provider_for_registry,
         "reviewer system".into(),
         meter.clone(),
+        vec![],
     );
 
     let exit = TeamMode {
@@ -412,6 +415,7 @@ async fn team_mode_uses_supplied_coordinator_system_prompt() {
         provider.clone(),
         "reviewer system".into(),
         meter.clone(),
+        vec![],
     );
     TeamMode {
         validated,

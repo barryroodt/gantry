@@ -15,7 +15,7 @@ const EXPECTED_TOOL_NAMES: [&str; 6] = [
 
 #[test]
 fn schemas_returns_six_stable_tool_names() {
-    let registry = ToolRegistry::new(std::env::temp_dir());
+    let registry = ToolRegistry::new(std::env::temp_dir(), vec![]);
     let schemas = registry.schemas();
 
     assert_eq!(schemas.len(), 6);
@@ -28,7 +28,7 @@ async fn dispatch_read_file_happy_path() {
     let dir = TempDir::new().unwrap();
     std::fs::write(dir.path().join("hello.txt"), "hello world").unwrap();
 
-    let registry = ToolRegistry::new(dir.path().to_path_buf());
+    let registry = ToolRegistry::new(dir.path().to_path_buf(), vec![]);
     let out = registry
         .dispatch("assistant", 1, "read_file", r#"{"path":"hello.txt"}"#)
         .await;
@@ -39,7 +39,7 @@ async fn dispatch_read_file_happy_path() {
 
 #[tokio::test]
 async fn dispatch_unknown_tool_returns_error_content() {
-    let registry = ToolRegistry::new(std::env::temp_dir());
+    let registry = ToolRegistry::new(std::env::temp_dir(), vec![]);
     let out = registry
         .dispatch("assistant", 2, "unknown_tool", "{}")
         .await;
@@ -53,7 +53,7 @@ async fn dispatch_unknown_tool_returns_error_content() {
 
 #[tokio::test]
 async fn dispatch_malformed_json_returns_invalid_input_error() {
-    let registry = ToolRegistry::new(std::env::temp_dir());
+    let registry = ToolRegistry::new(std::env::temp_dir(), vec![]);
     let out = registry.dispatch("assistant", 3, "read_file", "{").await;
 
     assert!(
@@ -69,7 +69,7 @@ async fn dispatch_emits_paired_tool_call_and_tool_result_events() {
     std::fs::write(dir.path().join("tracked.txt"), "tracked").unwrap();
 
     let guard = TestEmitterGuard::install();
-    let registry = ToolRegistry::new(dir.path().to_path_buf());
+    let registry = ToolRegistry::new(dir.path().to_path_buf(), vec![]);
 
     let _ = registry
         .dispatch("reviewer", 7, "read_file", r#"{"path":"tracked.txt"}"#)
@@ -121,7 +121,7 @@ async fn dispatch_emits_paired_tool_call_and_tool_result_events() {
 #[tokio::test]
 async fn dispatch_error_still_emits_paired_events_with_error_field() {
     let guard = TestEmitterGuard::install();
-    let registry = ToolRegistry::new(std::env::temp_dir());
+    let registry = ToolRegistry::new(std::env::temp_dir(), vec![]);
 
     let out = registry
         .dispatch("assistant", 4, "unknown_tool", "{}")
@@ -141,4 +141,57 @@ async fn dispatch_error_still_emits_paired_events_with_error_field() {
     );
 
     assert_tool_call_pairing(&events).expect("pairing on error path");
+}
+
+#[test]
+fn base_tool_names_const_matches_schemas() {
+    use gantry::tools::registry::{available_tool_names, BASE_TOOL_NAMES};
+    let registry = ToolRegistry::new(std::env::temp_dir(), vec![]);
+    let schemas = registry.schemas();
+    let names: Vec<&str> = schemas.iter().map(|s| s.name.as_str()).collect();
+    assert_eq!(names, BASE_TOOL_NAMES);
+    assert_eq!(available_tool_names(false), BASE_TOOL_NAMES);
+}
+
+#[test]
+fn allowlist_filters_exposed_schemas() {
+    let registry = ToolRegistry::new(
+        std::env::temp_dir(),
+        vec!["read_file".into(), "git_diff".into()],
+    );
+    let schemas = registry.schemas();
+    let names: Vec<&str> = schemas.iter().map(|s| s.name.as_str()).collect();
+    assert_eq!(names, ["read_file", "git_diff"]);
+}
+
+#[tokio::test]
+async fn disallowed_tool_dispatch_returns_unknown_tool() {
+    let dir = TempDir::new().unwrap();
+    let _guard = TestEmitterGuard::install();
+    let registry = ToolRegistry::new(dir.path().to_path_buf(), vec!["read_file".into()]);
+
+    let out = registry
+        .dispatch(
+            "assistant",
+            1,
+            "shell",
+            r#"{"program":"git","args":["--version"]}"#,
+        )
+        .await;
+
+    assert!(out.content.contains("unknown tool"), "got: {}", out.content);
+}
+
+#[tokio::test]
+async fn allowlisted_tool_dispatches_normally() {
+    let dir = TempDir::new().unwrap();
+    std::fs::write(dir.path().join("hello.txt"), "hello world").unwrap();
+    let _guard = TestEmitterGuard::install();
+    let registry = ToolRegistry::new(dir.path().to_path_buf(), vec!["read_file".into()]);
+
+    let out = registry
+        .dispatch("assistant", 1, "read_file", r#"{"path":"hello.txt"}"#)
+        .await;
+
+    assert!(out.content.contains("hello world"), "got: {}", out.content);
 }

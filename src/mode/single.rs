@@ -175,7 +175,7 @@ pub async fn run_single(validated: Validated) -> ModeRunOutcome {
         }
     };
 
-    let registry = ToolRegistry::new(validated.workdir.clone());
+    let registry = ToolRegistry::new(validated.workdir.clone(), validated.tools.clone());
     let skill_loader = SkillLoader::new(validated.workdir.clone());
 
     let exit = SingleMode {
