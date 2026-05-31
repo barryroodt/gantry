@@ -26,9 +26,12 @@ impl SingleMode {
         let system_prefix = self
             .skill_loader
             .inject_core_skills(&self.validated.inject_skills);
-        let system = format!(
-            "{system_prefix}\nYou are gantry running a code review task. Use the available tools."
-        );
+        let body = self
+            .validated
+            .system_prompt
+            .as_deref()
+            .unwrap_or(crate::mode::DEFAULT_SYSTEM_PROMPT);
+        let system = format!("{system_prefix}\n{body}");
 
         let tools = self.registry.schemas();
         let mut messages: Vec<ChatMessage> = vec![ChatMessage::User(self.prompt.clone())];

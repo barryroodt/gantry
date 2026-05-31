@@ -17,12 +17,14 @@ use tempfile::TempDir;
 
 struct StubProvider {
     responses: Arc<Mutex<Vec<ProviderResponse>>>,
+    captured_system: Arc<Mutex<Vec<String>>>,
 }
 
 impl StubProvider {
     fn new(responses: Vec<ProviderResponse>) -> Self {
         Self {
             responses: Arc::new(Mutex::new(responses)),
+            captured_system: Arc::new(Mutex::new(Vec::new())),
         }
     }
 }
@@ -39,10 +41,14 @@ impl ProviderAdapter for StubProvider {
 
     async fn complete(
         &self,
-        _system: &str,
+        system: &str,
         _messages: &[ChatMessage],
         _tools: &[ToolSchema],
     ) -> anyhow::Result<ProviderResponse> {
+        self.captured_system
+            .lock()
+            .unwrap()
+            .push(system.to_string());
         let mut guard = self.responses.lock().unwrap();
         if guard.is_empty() {
             anyhow::bail!("stub provider: no more responses");
@@ -124,6 +130,8 @@ fn test_validated(workdir: &TempDir, prompt_file: &std::path::Path) -> Validated
         max_tokens: 10_000,
         timeout_ms: 60_000,
         inject_skills: vec![],
+        system_prompt: None,
+        subagent_system_prompt: None,
     }
 }
 
@@ -268,5 +276,88 @@ async fn single_mode_max_turns_cap_exits_ok() {
     assert_eq!(
         agent_turns, 20,
         "loop should cap at MAX_TURNS provider calls"
+    );
+}
+
+#[tokio::test]
+async fn single_mode_uses_supplied_system_prompt() {
+    let _guard = TestEmitterGuard::install();
+    let dir = TempDir::new().unwrap();
+    let prompt_path = dir.path().join("prompt.md");
+    std::fs::write(&prompt_path, "do the task").unwrap();
+
+    let provider = StubProvider::new(vec![ProviderResponse {
+        text: "done".into(),
+        tool_calls: vec![],
+        input_tokens: 1,
+        output_tokens: 1,
+        cache_read: 0,
+        cache_write: 0,
+    }]);
+    let captured = provider.captured_system.clone();
+
+    let mut validated = test_validated(&dir, &prompt_path);
+    validated.system_prompt = Some("MARKER-SYSTEM-PERSONA".into());
+
+    let cancel = shared_token();
+    let meter = Arc::new(TokenMeter::new(validated.max_tokens, cancel.clone()));
+    let _watchdog = spawn_timeout_watchdog(cancel.clone(), validated.timeout_ms);
+    SingleMode {
+        validated,
+        meter,
+        cancel,
+        registry: ToolRegistry::new(dir.path().to_path_buf()),
+        skill_loader: SkillLoader::new(dir.path().to_path_buf()),
+        provider: Box::new(provider),
+        prompt: "do the task".into(),
+    }
+    .run()
+    .await;
+
+    let systems = captured.lock().unwrap();
+    assert!(
+        systems.iter().any(|s| s.contains("MARKER-SYSTEM-PERSONA")),
+        "supplied system prompt not used: {systems:?}"
+    );
+}
+
+#[tokio::test]
+async fn single_mode_default_system_prompt_when_none() {
+    let _guard = TestEmitterGuard::install();
+    let dir = TempDir::new().unwrap();
+    let prompt_path = dir.path().join("prompt.md");
+    std::fs::write(&prompt_path, "do the task").unwrap();
+
+    let provider = StubProvider::new(vec![ProviderResponse {
+        text: "done".into(),
+        tool_calls: vec![],
+        input_tokens: 1,
+        output_tokens: 1,
+        cache_read: 0,
+        cache_write: 0,
+    }]);
+    let captured = provider.captured_system.clone();
+
+    let validated = test_validated(&dir, &prompt_path); // system_prompt: None
+
+    let cancel = shared_token();
+    let meter = Arc::new(TokenMeter::new(validated.max_tokens, cancel.clone()));
+    let _watchdog = spawn_timeout_watchdog(cancel.clone(), validated.timeout_ms);
+    SingleMode {
+        validated,
+        meter,
+        cancel,
+        registry: ToolRegistry::new(dir.path().to_path_buf()),
+        skill_loader: SkillLoader::new(dir.path().to_path_buf()),
+        provider: Box::new(provider),
+        prompt: "do the task".into(),
+    }
+    .run()
+    .await;
+
+    let systems = captured.lock().unwrap();
+    assert!(
+        systems.iter().any(|s| s.contains("gantry harness")),
+        "default system prompt not used: {systems:?}"
     );
 }

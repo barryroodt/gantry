@@ -19,6 +19,7 @@ use tempfile::TempDir;
 struct TeamCoordinatorProvider {
     coordinator: Mutex<Vec<ProviderResponse>>,
     reviewer_text: String,
+    captured_system: Arc<Mutex<Vec<String>>>,
 }
 
 impl TeamCoordinatorProvider {
@@ -26,6 +27,7 @@ impl TeamCoordinatorProvider {
         Self {
             coordinator: Mutex::new(coordinator),
             reviewer_text: reviewer_text.into(),
+            captured_system: Arc::new(Mutex::new(Vec::new())),
         }
     }
 }
@@ -42,10 +44,14 @@ impl ProviderAdapter for TeamCoordinatorProvider {
 
     async fn complete(
         &self,
-        _system: &str,
+        system: &str,
         messages: &[ChatMessage],
         _tools: &[ToolSchema],
     ) -> anyhow::Result<ProviderResponse> {
+        self.captured_system
+            .lock()
+            .unwrap()
+            .push(system.to_string());
         if messages
             .iter()
             .any(|m| matches!(m, ChatMessage::User(text) if text.starts_with("Role: ")))
@@ -118,6 +124,8 @@ fn test_validated(workdir: &TempDir, prompt_file: &std::path::Path) -> Validated
         max_tokens: 10_000,
         timeout_ms: 60_000,
         inject_skills: vec![],
+        system_prompt: None,
+        subagent_system_prompt: None,
     }
 }
 
@@ -368,5 +376,60 @@ async fn team_mode_budget_trip_during_reviewer_round() {
             .iter()
             .any(|e| matches!(e, GantryEvent::BudgetExceeded { .. })),
         "expected budget_exceeded event"
+    );
+}
+
+#[tokio::test]
+async fn team_mode_uses_supplied_coordinator_system_prompt() {
+    let _guard = TestEmitterGuard::install();
+    let dir = TempDir::new().unwrap();
+    let prompt_path = dir.path().join("prompt.md");
+    std::fs::write(&prompt_path, "team task").unwrap();
+
+    let provider = Arc::new(TeamCoordinatorProvider::new(
+        vec![ProviderResponse {
+            text: "done".into(),
+            tool_calls: vec![],
+            input_tokens: 1,
+            output_tokens: 1,
+            cache_read: 0,
+            cache_write: 0,
+        }],
+        "unused reviewer text",
+    ));
+    let captured = provider.captured_system.clone();
+
+    let mut validated = test_validated(&dir, &prompt_path);
+    validated.system_prompt = Some("MARKER-TEAM-COORD".into());
+
+    let cancel = shared_token();
+    let meter = Arc::new(TokenMeter::new(validated.max_tokens, cancel.clone()));
+    let _watchdog = spawn_timeout_watchdog(cancel.clone(), validated.timeout_ms);
+    let roster = Arc::new(ReviewerRoster::new());
+    let registry = ToolRegistry::team(
+        validated.workdir.clone(),
+        roster.clone(),
+        provider.clone(),
+        "reviewer system".into(),
+        meter.clone(),
+    );
+    TeamMode {
+        validated,
+        meter,
+        cancel,
+        registry,
+        roster,
+        skill_loader: SkillLoader::new(dir.path().to_path_buf()),
+        provider,
+        prompt: "team task".into(),
+        spawned_reviewers: 0,
+    }
+    .run()
+    .await;
+
+    let systems = captured.lock().unwrap();
+    assert!(
+        systems.iter().any(|s| s.contains("MARKER-TEAM-COORD")),
+        "supplied coordinator system not used: {systems:?}"
     );
 }

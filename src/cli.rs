@@ -31,6 +31,16 @@ pub struct Cli {
     /// orchestrator decides the set. Absent names are skipped with a warning.
     #[arg(long = "inject-skill", value_name = "NAME")]
     pub inject_skills: Vec<String>,
+    /// System prompt body for the agent (single/team-coordinator persona),
+    /// read from this file. If omitted, a minimal neutral default is used; the
+    /// orchestrator supplies the real persona (e.g. a review profile).
+    #[arg(long = "system-file", value_name = "PATH")]
+    pub system_file: Option<PathBuf>,
+
+    /// System prompt body for spawned subagents (team reviewer base persona),
+    /// read from this file. If omitted, a minimal neutral default is used.
+    #[arg(long = "subagent-system-file", value_name = "PATH")]
+    pub subagent_system_file: Option<PathBuf>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, ValueEnum)]
@@ -109,6 +119,11 @@ pub enum ConfigError {
 
     #[error("workdir is not a directory: {}", .0.display())]
     WorkdirNotDirectory(PathBuf),
+    #[error("system file not found: {}", .0.display())]
+    SystemFileMissing(PathBuf),
+
+    #[error("system file is not readable: {}", .0.display())]
+    SystemFileNotReadable(PathBuf),
 }
 
 impl From<clap::Error> for ConfigError {
@@ -128,6 +143,8 @@ pub struct Validated {
     pub max_tokens: u64,
     pub timeout_ms: u64,
     pub inject_skills: Vec<String>,
+    pub system_prompt: Option<String>,
+    pub subagent_system_prompt: Option<String>,
 }
 
 impl Cli {
@@ -159,6 +176,9 @@ impl Cli {
             return Err(ConfigError::PromptFileMissing(self.prompt_file.clone()));
         }
         let (provider, model) = parse_model_slug(&self.model)?;
+        let system_prompt = read_optional_system_file(self.system_file.as_deref())?;
+        let subagent_system_prompt =
+            read_optional_system_file(self.subagent_system_file.as_deref())?;
         Ok(Validated {
             mode: self.mode,
             model,
@@ -168,6 +188,8 @@ impl Cli {
             max_tokens: self.max_tokens,
             timeout_ms: self.timeout_ms,
             inject_skills: self.inject_skills,
+            system_prompt,
+            subagent_system_prompt,
         })
     }
 
@@ -223,4 +245,16 @@ fn validate_prompt_file(prompt_file: &Path) -> Result<(), ConfigError> {
         ));
     }
     Ok(())
+}
+
+/// Read an optional system-prompt file. `None` path → `None`. Missing file →
+/// [`ConfigError::SystemFileMissing`]; unreadable → [`ConfigError::SystemFileNotReadable`].
+fn read_optional_system_file(path: Option<&Path>) -> Result<Option<String>, ConfigError> {
+    match path {
+        None => Ok(None),
+        Some(p) if !p.exists() => Err(ConfigError::SystemFileMissing(p.to_path_buf())),
+        Some(p) => std::fs::read_to_string(p)
+            .map(Some)
+            .map_err(|_| ConfigError::SystemFileNotReadable(p.to_path_buf())),
+    }
 }

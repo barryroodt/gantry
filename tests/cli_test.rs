@@ -25,6 +25,8 @@ fn base_cli(workdir: &Path, prompt_file: &Path) -> Cli {
         max_tokens: 8192,
         timeout_ms: 60_000,
         inject_skills: vec![],
+        system_file: None,
+        subagent_system_file: None,
     }
 }
 
@@ -295,4 +297,90 @@ fn parses_all_six_flags_from_argv() {
     assert_eq!(cli.prompt_file, prompt);
     assert_eq!(cli.max_tokens, 4096);
     assert_eq!(cli.timeout_ms, 120_000);
+}
+
+#[test]
+fn parses_system_file_into_validated() {
+    let workdir = temp_workdir("system-file");
+    let prompt = write_prompt_file(&workdir, "prompt.txt", "hello");
+    let sys = write_prompt_file(&workdir, "system.md", "CUSTOM SYSTEM PERSONA");
+
+    let validated = Cli::parse_and_validate_from([
+        "gantry",
+        "--mode",
+        "single",
+        "--model",
+        "openai/gpt-4o",
+        "--workdir",
+        workdir.to_str().unwrap(),
+        "--prompt-file",
+        prompt.to_str().unwrap(),
+        "--max-tokens",
+        "8192",
+        "--timeout-ms",
+        "60000",
+        "--system-file",
+        sys.to_str().unwrap(),
+    ])
+    .expect("parse_and_validate");
+
+    assert_eq!(
+        validated.system_prompt.as_deref(),
+        Some("CUSTOM SYSTEM PERSONA")
+    );
+    assert_eq!(validated.subagent_system_prompt, None);
+}
+
+#[test]
+fn missing_system_file_returns_config_error() {
+    let workdir = temp_workdir("system-file-missing");
+    let prompt = write_prompt_file(&workdir, "prompt.txt", "hello");
+    let missing = workdir.join("nope.md");
+
+    let err = Cli::parse_and_validate_from([
+        "gantry",
+        "--mode",
+        "single",
+        "--model",
+        "openai/gpt-4o",
+        "--workdir",
+        workdir.to_str().unwrap(),
+        "--prompt-file",
+        prompt.to_str().unwrap(),
+        "--max-tokens",
+        "8192",
+        "--timeout-ms",
+        "60000",
+        "--system-file",
+        missing.to_str().unwrap(),
+    ])
+    .unwrap_err();
+
+    assert_eq!(err, ConfigError::SystemFileMissing(missing));
+}
+
+#[test]
+fn system_prompt_default_none_when_flag_absent() {
+    let workdir = temp_workdir("system-file-absent");
+    let prompt = write_prompt_file(&workdir, "prompt.txt", "hello");
+
+    let validated = Cli::parse_and_validate_from([
+        "gantry",
+        "--mode",
+        "single",
+        "--model",
+        "openai/gpt-4o",
+        "--workdir",
+        workdir.to_str().unwrap(),
+        "--prompt-file",
+        prompt.to_str().unwrap(),
+        "--max-tokens",
+        "8192",
+        "--timeout-ms",
+        "60000",
+    ])
+    .expect("parse_and_validate");
+
+    assert!(validated.system_prompt.is_none());
+    assert!(validated.subagent_system_prompt.is_none());
 }
