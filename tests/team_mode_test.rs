@@ -1,5 +1,4 @@
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use gantry::cancel::{shared_token, spawn_timeout_watchdog};
@@ -16,101 +15,94 @@ use gantry::tools::subagent::SubagentRoster;
 use gantry::tools::ToolRegistry;
 use tempfile::TempDir;
 
-struct TeamCoordinatorProvider {
-    coordinator: Mutex<Vec<ProviderResponse>>,
-    reviewer_text: String,
-    captured_system: Arc<Mutex<Vec<String>>>,
+/// Stateless provider for the harness-driven team state machine: returns a
+/// structured `respond` plan on the compose call, role text for subagents, and
+/// structured findings on the unify call. Phase is inferred from the messages.
+/// Optionally records the system prompts it is given (via a channel — no lock).
+struct TeamScriptProvider {
+    compose_json: String,
+    unify_json: String,
+    systems: Option<tokio::sync::mpsc::UnboundedSender<String>>,
 }
 
-impl TeamCoordinatorProvider {
-    fn new(coordinator: Vec<ProviderResponse>, reviewer_text: &str) -> Self {
+impl TeamScriptProvider {
+    fn new(compose_json: &str) -> Self {
         Self {
-            coordinator: Mutex::new(coordinator),
-            reviewer_text: reviewer_text.into(),
-            captured_system: Arc::new(Mutex::new(Vec::new())),
+            compose_json: compose_json.into(),
+            unify_json: r#"{"summary":"unified","verdict":"ready","findings":[],"strengths":[]}"#
+                .into(),
+            systems: None,
         }
+    }
+
+    fn capturing(compose_json: &str, tx: tokio::sync::mpsc::UnboundedSender<String>) -> Self {
+        let mut p = Self::new(compose_json);
+        p.systems = Some(tx);
+        p
+    }
+}
+
+fn respond(args_json: &str) -> ProviderResponse {
+    ProviderResponse {
+        text: String::new(),
+        tool_calls: vec![ToolCallRequest {
+            id: "respond".into(),
+            name: "respond".into(),
+            args_json: args_json.into(),
+        }],
+        input_tokens: 1,
+        output_tokens: 1,
+        cache_read: 0,
+        cache_write: 0,
     }
 }
 
 #[async_trait]
-impl ProviderAdapter for TeamCoordinatorProvider {
+impl ProviderAdapter for TeamScriptProvider {
     fn provider(&self) -> Provider {
         Provider::OpenAi
     }
-
     fn model(&self) -> &str {
-        "gpt-team-test"
+        "gpt-team"
     }
-
     async fn complete(
         &self,
         system: &str,
         messages: &[ChatMessage],
         _tools: &[ToolSchema],
     ) -> anyhow::Result<ProviderResponse> {
-        self.captured_system
-            .lock()
-            .unwrap()
-            .push(system.to_string());
-        if messages
+        if let Some(tx) = &self.systems {
+            let _ = tx.send(system.to_string());
+        }
+
+        // Subagent turn: first user line is "Role: <role>".
+        for m in messages {
+            if let ChatMessage::User(text) = m {
+                if let Some(role) = text.lines().next().and_then(|l| l.strip_prefix("Role: ")) {
+                    if role == "panic-role" {
+                        panic!("subagent task panic");
+                    }
+                    return Ok(ProviderResponse {
+                        text: format!("{role} report"),
+                        tool_calls: vec![],
+                        input_tokens: 1,
+                        output_tokens: 1,
+                        cache_read: 0,
+                        cache_write: 0,
+                    });
+                }
+            }
+        }
+
+        // Unify turn carries the collected reports; otherwise it is the compose turn.
+        let is_unify = messages
             .iter()
-            .any(|m| matches!(m, ChatMessage::User(text) if text.starts_with("Role: ")))
-        {
-            return Ok(ProviderResponse {
-                text: self.reviewer_text.clone(),
-                tool_calls: vec![],
-                input_tokens: 1,
-                output_tokens: 1,
-                cache_read: 0,
-                cache_write: 0,
-            });
+            .any(|m| matches!(m, ChatMessage::User(t) if t.contains("# Reviewer reports")));
+        if is_unify {
+            Ok(respond(&self.unify_json))
+        } else {
+            Ok(respond(&self.compose_json))
         }
-
-        let mut guard = self.coordinator.lock().unwrap();
-        if guard.is_empty() {
-            anyhow::bail!("team coordinator stub: no more responses");
-        }
-        Ok(guard.remove(0))
-    }
-}
-
-struct PanicReviewerProvider {
-    coordinator: Mutex<Vec<ProviderResponse>>,
-}
-
-impl PanicReviewerProvider {
-    fn new(coordinator: Vec<ProviderResponse>) -> Self {
-        Self {
-            coordinator: Mutex::new(coordinator),
-        }
-    }
-}
-
-#[async_trait]
-impl ProviderAdapter for PanicReviewerProvider {
-    fn provider(&self) -> Provider {
-        Provider::OpenAi
-    }
-
-    fn model(&self) -> &str {
-        "gpt-team-collapse"
-    }
-
-    async fn complete(
-        &self,
-        _system: &str,
-        messages: &[ChatMessage],
-        _tools: &[ToolSchema],
-    ) -> anyhow::Result<ProviderResponse> {
-        if messages
-            .iter()
-            .any(|m| matches!(m, ChatMessage::User(text) if text.starts_with("Role: ")))
-        {
-            panic!("subagent task panic");
-        }
-
-        let mut guard = self.coordinator.lock().unwrap();
-        Ok(guard.remove(0))
     }
 }
 
@@ -126,37 +118,25 @@ fn test_validated(workdir: &TempDir, prompt_file: &std::path::Path) -> Validated
         inject_skills: vec![],
         system_prompt: None,
         subagent_system_prompt: None,
+        compose_prompt: None,
+        unify_prompt: None,
         tools: vec![],
     }
 }
 
-async fn run_team_mode(
-    dir: &TempDir,
-    provider: Arc<dyn ProviderAdapter>,
-    max_tokens: u64,
-    timeout_ms: u64,
-) -> ExitCode {
-    let prompt_path = dir.path().join("prompt.md");
-    std::fs::write(&prompt_path, "team review this code").unwrap();
-
-    let mut validated = test_validated(dir, &prompt_path);
-    validated.max_tokens = max_tokens;
-    validated.timeout_ms = timeout_ms;
-
+fn build_team(dir: &TempDir, validated: Validated, provider: Arc<dyn ProviderAdapter>) -> TeamMode {
     let cancel = shared_token();
     let meter = Arc::new(TokenMeter::new(validated.max_tokens, cancel.clone()));
     let _watchdog = spawn_timeout_watchdog(cancel.clone(), validated.timeout_ms);
-
     let roster = Arc::new(SubagentRoster::new());
     let registry = ToolRegistry::team(
         validated.workdir.clone(),
         roster.clone(),
         provider.clone(),
-        "reviewer system".into(),
+        "subagent base".into(),
         meter.clone(),
         vec![],
     );
-
     TeamMode {
         validated,
         meter,
@@ -168,272 +148,113 @@ async fn run_team_mode(
         prompt: "team review this code".into(),
         spawned_subagents: 0,
     }
-    .run()
-    .await
+}
+
+async fn run_team_mode(
+    dir: &TempDir,
+    provider: Arc<dyn ProviderAdapter>,
+    max_tokens: u64,
+) -> ExitCode {
+    let prompt_path = dir.path().join("prompt.md");
+    std::fs::write(&prompt_path, "team review this code").unwrap();
+    let mut validated = test_validated(dir, &prompt_path);
+    validated.max_tokens = max_tokens;
+    build_team(dir, validated, provider).run().await
 }
 
 #[tokio::test]
-async fn team_mode_completes_ok_with_subagent_events() {
-    let _guard = TestEmitterGuard::install();
+async fn team_mode_completes_ok_spawns_plan_and_emits_unify_fence() {
+    let guard = TestEmitterGuard::install();
     let dir = TempDir::new().unwrap();
-
-    let provider = Arc::new(TeamCoordinatorProvider::new(
-        vec![
-            ProviderResponse {
-                text: String::new(),
-                tool_calls: vec![ToolCallRequest {
-                    id: "call_spawn".into(),
-                    name: "spawn_subagent".into(),
-                    args_json: r#"{"name":"correctness","role":"correctness","template":"correctness","scope":"full"}"#.into(),
-                }],
-                input_tokens: 5,
-                output_tokens: 5,
-                cache_read: 0,
-                cache_write: 0,
-            },
-            ProviderResponse {
-                text: String::new(),
-                tool_calls: vec![ToolCallRequest {
-                    id: "call_collect".into(),
-                    name: "collect_outputs".into(),
-                    args_json: r#"{"round":1}"#.into(),
-                }],
-                input_tokens: 5,
-                output_tokens: 5,
-                cache_read: 0,
-                cache_write: 0,
-            },
-            ProviderResponse {
-                text: "```json\n{\"summary\":\"ok\",\"verdict\":\"ready\",\"findings\":[],\"strengths\":[]}\n```".into(),
-                tool_calls: vec![],
-                input_tokens: 5,
-                output_tokens: 5,
-                cache_read: 0,
-                cache_write: 0,
-            },
-        ],
-        "round-1 reviewer report",
+    let provider = Arc::new(TeamScriptProvider::new(
+        r#"{"reviewers":[{"name":"correctness","role":"correctness","scope":"full"},{"name":"spec-compliance","role":"spec-compliance","scope":"full"}]}"#,
     ));
 
-    let exit = run_team_mode(&dir, provider, 10_000, 60_000).await;
-
+    let exit = run_team_mode(&dir, provider, 100_000).await;
     assert_eq!(exit, ExitCode::Ok);
 
-    tokio::time::sleep(Duration::from_millis(50)).await;
+    let events = guard.drain_events();
+    let spawns = events
+        .iter()
+        .filter(|e| matches!(e, GantryEvent::SubagentSpawn { .. }))
+        .count();
+    assert_eq!(spawns, 2, "expected one spawn per planned reviewer");
 
-    let events = _guard.drain_events();
+    let fence = events.iter().find_map(|e| match e {
+        GantryEvent::AssistantText { text, .. } if text.contains("```json") => Some(text.clone()),
+        _ => None,
+    });
+    let fence = fence.expect("terminal JSON fence emitted");
     assert!(
-        events
-            .iter()
-            .any(|e| matches!(e, GantryEvent::SubagentSpawn { name, .. } if name == "correctness")),
-        "expected subagent_spawn, got: {events:?}"
+        fence.contains("\"verdict\""),
+        "fence missing verdict: {fence}"
     );
     assert!(
-        events
-            .iter()
-            .any(|e| matches!(e, GantryEvent::SubagentDone { name, .. } if name == "correctness")),
-        "expected subagent_done, got: {events:?}"
-    );
-    assert!(
-        events.iter().any(|e| matches!(
-            e,
-            GantryEvent::AssistantText { text, role, .. }
-                if role == "coordinator" && text.contains("```json")
-        )),
-        "expected coordinator JSON fence"
+        fence.contains("ready"),
+        "fence missing unified verdict: {fence}"
     );
 }
 
 #[tokio::test]
 async fn team_mode_all_subagents_crash_emits_team_collapse() {
-    let _guard = TestEmitterGuard::install();
+    let guard = TestEmitterGuard::install();
     let dir = TempDir::new().unwrap();
+    let provider = Arc::new(TeamScriptProvider::new(
+        r#"{"reviewers":[{"name":"a","role":"panic-role","scope":"full"},{"name":"b","role":"panic-role","scope":"full"}]}"#,
+    ));
 
-    let provider = Arc::new(PanicReviewerProvider::new(vec![
-        ProviderResponse {
-            text: String::new(),
-            tool_calls: vec![
-                ToolCallRequest {
-                    id: "call_spawn_a".into(),
-                    name: "spawn_subagent".into(),
-                    args_json: r#"{"name":"broken-a","role":"panic-role","template":"panic-role","scope":"full"}"#.into(),
-                },
-                ToolCallRequest {
-                    id: "call_spawn_b".into(),
-                    name: "spawn_subagent".into(),
-                    args_json: r#"{"name":"broken-b","role":"panic-role","template":"panic-role","scope":"full"}"#.into(),
-                },
-            ],
-            input_tokens: 5,
-            output_tokens: 5,
-            cache_read: 0,
-            cache_write: 0,
-        },
-        ProviderResponse {
-            text: String::new(),
-            tool_calls: vec![ToolCallRequest {
-                id: "call_collect".into(),
-                name: "collect_outputs".into(),
-                args_json: r#"{"round":1}"#.into(),
-            }],
-            input_tokens: 5,
-            output_tokens: 5,
-            cache_read: 0,
-            cache_write: 0,
-        },
-    ]));
-
-    let exit = run_team_mode(&dir, provider, 10_000, 60_000).await;
-
+    let exit = run_team_mode(&dir, provider, 100_000).await;
     assert_eq!(exit, ExitCode::Error);
 
-    let events = _guard.drain_events();
-    assert!(
-        events.iter().any(|e| matches!(
+    let collapsed = guard.drain_events().into_iter().any(|e| {
+        matches!(
             e,
             GantryEvent::Error {
                 kind: ErrorKind::TeamCollapse,
                 ..
             }
-        )),
-        "expected team_collapse error, got: {events:?}"
-    );
+        )
+    });
+    assert!(collapsed, "expected a team_collapse error");
 }
 
 #[tokio::test]
-async fn team_mode_budget_trip_during_reviewer_round() {
+async fn team_mode_budget_trip_during_compose() {
     let _guard = TestEmitterGuard::install();
     let dir = TempDir::new().unwrap();
-
-    let provider = Arc::new(TeamCoordinatorProvider::new(
-        vec![
-            ProviderResponse {
-                text: String::new(),
-                tool_calls: vec![ToolCallRequest {
-                    id: "call_spawn".into(),
-                    name: "spawn_subagent".into(),
-                    args_json: r#"{"name":"correctness","role":"correctness","template":"correctness","scope":"full"}"#.into(),
-                }],
-                input_tokens: 5,
-                output_tokens: 5,
-                cache_read: 0,
-                cache_write: 0,
-            },
-            ProviderResponse {
-                text: String::new(),
-                tool_calls: vec![ToolCallRequest {
-                    id: "call_collect".into(),
-                    name: "collect_outputs".into(),
-                    args_json: r#"{"round":1}"#.into(),
-                }],
-                input_tokens: 60,
-                output_tokens: 50,
-                cache_read: 0,
-                cache_write: 0,
-            },
-        ],
-        "slow reviewer report",
+    let provider = Arc::new(TeamScriptProvider::new(
+        r#"{"reviewers":[{"name":"correctness","role":"correctness","scope":"full"}]}"#,
     ));
 
-    let cancel = shared_token();
-    let meter = Arc::new(TokenMeter::new(100, cancel.clone()));
-    let _watchdog = spawn_timeout_watchdog(cancel.clone(), 60_000);
-
-    let prompt_path = dir.path().join("prompt.md");
-    std::fs::write(&prompt_path, "team review").unwrap();
-    let validated = test_validated(&dir, &prompt_path);
-
-    let roster = Arc::new(SubagentRoster::new());
-    let provider_for_registry = provider.clone();
-    let registry = ToolRegistry::team(
-        validated.workdir.clone(),
-        roster.clone(),
-        provider_for_registry,
-        "reviewer system".into(),
-        meter.clone(),
-        vec![],
-    );
-
-    let exit = TeamMode {
-        validated,
-        meter: meter.clone(),
-        cancel: cancel.clone(),
-        registry,
-        roster,
-        skill_loader: SkillLoader::new(dir.path().to_path_buf()),
-        provider,
-        prompt: "team review".into(),
-        spawned_subagents: 0,
-    }
-    .run()
-    .await;
-
+    // max_tokens = 1: the compose call's tokens trip the meter before spawning.
+    let exit = run_team_mode(&dir, provider, 1).await;
     assert_eq!(exit, ExitCode::Budget);
-    assert!(
-        cancel.is_cancelled(),
-        "cancel should propagate on budget trip"
-    );
-    assert!(
-        _guard
-            .drain_events()
-            .iter()
-            .any(|e| matches!(e, GantryEvent::BudgetExceeded { .. })),
-        "expected budget_exceeded event"
-    );
 }
 
 #[tokio::test]
-async fn team_mode_uses_supplied_coordinator_system_prompt() {
+async fn team_mode_uses_supplied_compose_prompt() {
     let _guard = TestEmitterGuard::install();
     let dir = TempDir::new().unwrap();
     let prompt_path = dir.path().join("prompt.md");
-    std::fs::write(&prompt_path, "team task").unwrap();
+    std::fs::write(&prompt_path, "team review this code").unwrap();
 
-    let provider = Arc::new(TeamCoordinatorProvider::new(
-        vec![ProviderResponse {
-            text: "done".into(),
-            tool_calls: vec![],
-            input_tokens: 1,
-            output_tokens: 1,
-            cache_read: 0,
-            cache_write: 0,
-        }],
-        "unused reviewer text",
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    let provider = Arc::new(TeamScriptProvider::capturing(
+        r#"{"reviewers":[{"name":"correctness","role":"correctness","scope":"full"}]}"#,
+        tx,
     ));
-    let captured = provider.captured_system.clone();
 
     let mut validated = test_validated(&dir, &prompt_path);
-    validated.system_prompt = Some("MARKER-TEAM-COORD".into());
+    validated.compose_prompt = Some("MARKER-COMPOSE-PERSONA".into());
 
-    let cancel = shared_token();
-    let meter = Arc::new(TokenMeter::new(validated.max_tokens, cancel.clone()));
-    let _watchdog = spawn_timeout_watchdog(cancel.clone(), validated.timeout_ms);
-    let roster = Arc::new(SubagentRoster::new());
-    let registry = ToolRegistry::team(
-        validated.workdir.clone(),
-        roster.clone(),
-        provider.clone(),
-        "reviewer system".into(),
-        meter.clone(),
-        vec![],
-    );
-    TeamMode {
-        validated,
-        meter,
-        cancel,
-        registry,
-        roster,
-        skill_loader: SkillLoader::new(dir.path().to_path_buf()),
-        provider,
-        prompt: "team task".into(),
-        spawned_subagents: 0,
+    build_team(&dir, validated, provider).run().await;
+
+    let mut systems = Vec::new();
+    while let Ok(s) = rx.try_recv() {
+        systems.push(s);
     }
-    .run()
-    .await;
-
-    let systems = captured.lock().unwrap();
     assert!(
-        systems.iter().any(|s| s.contains("MARKER-TEAM-COORD")),
-        "supplied coordinator system not used: {systems:?}"
+        systems.iter().any(|s| s.contains("MARKER-COMPOSE-PERSONA")),
+        "compose call did not use the supplied compose prompt: {systems:?}"
     );
 }

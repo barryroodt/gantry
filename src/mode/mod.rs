@@ -1,6 +1,7 @@
 use crate::events::ExitCode;
 use crate::meter::MeterSnapshot;
 
+pub mod agent_loop;
 pub mod single;
 pub mod team;
 

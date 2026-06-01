@@ -165,6 +165,8 @@ pub struct Validated {
     pub inject_skills: Vec<String>,
     pub system_prompt: Option<String>,
     pub subagent_system_prompt: Option<String>,
+    pub compose_prompt: Option<String>,
+    pub unify_prompt: Option<String>,
     pub tools: Vec<String>,
 }
 
@@ -219,6 +221,8 @@ impl Cli {
                     .as_ref()
                     .and_then(|p| p.subagent_system_prompt.clone()),
             };
+        let compose_prompt = profile.as_ref().and_then(|p| p.compose_prompt.clone());
+        let unify_prompt = profile.as_ref().and_then(|p| p.unify_prompt.clone());
 
         let available = crate::tools::registry::available_tool_names(mode == Mode::Team);
         let tools = if self.tools.is_empty() {
@@ -267,6 +271,8 @@ impl Cli {
             inject_skills,
             system_prompt,
             subagent_system_prompt,
+            compose_prompt,
+            unify_prompt,
             tools,
         })
     }

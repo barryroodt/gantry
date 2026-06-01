@@ -132,6 +132,8 @@ fn test_validated(workdir: &TempDir, prompt_file: &std::path::Path) -> Validated
         inject_skills: vec![],
         system_prompt: None,
         subagent_system_prompt: None,
+        compose_prompt: None,
+        unify_prompt: None,
         tools: vec![],
     }
 }
