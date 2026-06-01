@@ -4,7 +4,7 @@ use crate::meter::TokenMeter;
 use crate::mode::ModeRunOutcome;
 use crate::provider::{build_adapter, ChatMessage, ProviderAdapter, ToolResult};
 use crate::skills::SkillLoader;
-use crate::tools::subagent::{CollectOutputsArgs, SubagentRoster};
+use crate::tools::subagent::SubagentRoster;
 use crate::tools::ToolRegistry;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
@@ -108,7 +108,7 @@ impl TeamMode {
 
             let mut tool_results = Vec::with_capacity(resp.tool_calls.len());
             for call in &resp.tool_calls {
-                let mut out = self
+                let out = self
                     .registry
                     .dispatch(COORDINATOR_ROLE, turn, &call.name, &call.args_json)
                     .await;
@@ -116,19 +116,14 @@ impl TeamMode {
                 if call.name == "spawn_subagent" && out.content.contains("subagent spawned:") {
                     self.spawned_subagents += 1;
                 }
-                if call.name == "collect_outputs" {
-                    out.content = self
-                        .finalize_collect_outputs(&call.args_json, out.content)
-                        .await;
-                    if self.team_collapsed(&out.content) {
-                        let _ = GantryEvent::Error {
-                            ts: now_ms(),
-                            kind: ErrorKind::TeamCollapse,
-                            message: "all subagents crashed or produced no output".into(),
-                        }
-                        .emit();
-                        return ExitCode::Error;
+                if call.name == "collect_outputs" && self.team_collapsed(&out.content) {
+                    let _ = GantryEvent::Error {
+                        ts: now_ms(),
+                        kind: ErrorKind::TeamCollapse,
+                        message: "all subagents crashed or produced no output".into(),
                     }
+                    .emit();
+                    return ExitCode::Error;
                 }
 
                 tool_results.push(ToolResult {
@@ -149,21 +144,20 @@ impl TeamMode {
         ExitCode::Ok
     }
 
-    async fn finalize_collect_outputs(&self, args_json: &str, initial: String) -> String {
-        if !initial.trim().is_empty() || self.spawned_subagents == 0 {
-            return initial;
-        }
-
-        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
-
-        let Ok(args) = serde_json::from_str::<CollectOutputsArgs>(args_json) else {
-            return initial;
-        };
-        self.roster.collect_outputs(args).await.unwrap_or(initial)
-    }
-
     fn team_collapsed(&self, collect_output: &str) -> bool {
-        self.spawned_subagents > 0 && collect_output.trim().is_empty()
+        if self.spawned_subagents == 0 {
+            return false;
+        }
+        // Collapse = no subagent produced a `complete` report this round.
+        serde_json::from_str::<serde_json::Value>(collect_output)
+            .ok()
+            .and_then(|v| {
+                v.get("subagents").and_then(|s| s.as_array()).map(|arr| {
+                    !arr.iter()
+                        .any(|r| r.get("status").and_then(|s| s.as_str()) == Some("complete"))
+                })
+            })
+            .unwrap_or(true)
     }
 }
 

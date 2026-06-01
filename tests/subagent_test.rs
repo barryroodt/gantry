@@ -356,3 +356,121 @@ async fn single_mode_rejects_subagent_tools() {
         out.content
     );
 }
+
+struct SlowProvider {
+    delay_ms: u64,
+}
+
+#[async_trait]
+impl ProviderAdapter for SlowProvider {
+    fn provider(&self) -> Provider {
+        Provider::OpenAi
+    }
+    fn model(&self) -> &str {
+        "slow"
+    }
+    async fn complete(
+        &self,
+        _system: &str,
+        _messages: &[ChatMessage],
+        _tools: &[ToolSchema],
+    ) -> anyhow::Result<ProviderResponse> {
+        tokio::time::sleep(Duration::from_millis(self.delay_ms)).await;
+        Ok(ProviderResponse {
+            text: "late".into(),
+            tool_calls: vec![],
+            input_tokens: 1,
+            output_tokens: 1,
+            cache_read: 0,
+            cache_write: 0,
+        })
+    }
+}
+
+#[tokio::test]
+async fn collect_outputs_returns_structured_name_sorted_status() {
+    let _guard = TestEmitterGuard::install();
+    let dir = TempDir::new().unwrap();
+    let roster = Arc::new(SubagentRoster::new());
+    let provider = Arc::new(
+        RoleTextProvider::new()
+            .with_role("alpha", vec!["alpha report"])
+            .with_role("beta", vec!["beta report"]),
+    );
+    let registry = ToolRegistry::team(
+        dir.path().to_path_buf(),
+        roster.clone(),
+        provider,
+        "subagent base".into(),
+        test_meter(),
+        vec![],
+    );
+    // Spawn out of name order to prove collect_outputs sorts by name.
+    registry
+        .dispatch(
+            "coordinator",
+            1,
+            "spawn_subagent",
+            r#"{"name":"beta","role":"beta","template":"beta","scope":"full"}"#,
+        )
+        .await;
+    registry
+        .dispatch(
+            "coordinator",
+            1,
+            "spawn_subagent",
+            r#"{"name":"alpha","role":"alpha","template":"alpha","scope":"full"}"#,
+        )
+        .await;
+
+    let out = registry
+        .dispatch("coordinator", 2, "collect_outputs", r#"{"round":1}"#)
+        .await;
+    let c = &out.content;
+    let ai = c.find(r#""name":"alpha""#).expect("alpha present");
+    let bi = c.find(r#""name":"beta""#).expect("beta present");
+    assert!(ai < bi, "subagents not name-sorted: {c}");
+    assert!(c.contains(r#""status":"complete""#), "missing status: {c}");
+    assert!(
+        c.contains("alpha report") && c.contains("beta report"),
+        "missing reports: {c}"
+    );
+}
+
+#[tokio::test]
+async fn collect_outputs_times_out_slow_subagent() {
+    let _guard = TestEmitterGuard::install();
+    let dir = TempDir::new().unwrap();
+    let roster = Arc::new(SubagentRoster::new());
+    let provider = Arc::new(SlowProvider { delay_ms: 1000 });
+    let registry = ToolRegistry::team(
+        dir.path().to_path_buf(),
+        roster.clone(),
+        provider,
+        "base".into(),
+        test_meter(),
+        vec![],
+    );
+    registry
+        .dispatch(
+            "coordinator",
+            1,
+            "spawn_subagent",
+            r#"{"name":"slow","role":"slow","template":"slow","scope":"full"}"#,
+        )
+        .await;
+
+    let out = registry
+        .dispatch(
+            "coordinator",
+            2,
+            "collect_outputs",
+            r#"{"round":1,"timeout_ms":50}"#,
+        )
+        .await;
+    assert!(
+        out.content.contains(r#""status":"timeout""#),
+        "expected timeout status: {}",
+        out.content
+    );
+}

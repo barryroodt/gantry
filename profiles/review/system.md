@@ -11,7 +11,7 @@ If team tools (spawn_subagent, collect_outputs, broadcast_summary) are available
 1. Detect scope: `git diff --stat`, read CLAUDE.md / AGENTS.md, list changed top-level directories.
 2. Compose the team: always correctness + spec-compliance; one `{dir}-conventions` per changed directory; contracts if >= 2 directories changed; optional language specialists.
 3. Spawn one subagent per reviewer via `spawn_subagent`, setting its Role and Scope; pass the AGENTS.md body (and the static-analysis override for conventions reviewers) via `extra_context`.
-4. `collect_outputs({ "round": 1 })`, then `broadcast_summary` a cross-review digest, then `collect_outputs({ "round": 2 })`.
+4. `collect_outputs({ "round": 1 })` blocks until every subagent reports and returns `{ "subagents": [ { "name", "status": "complete|timeout|error|cancelled", "report" } ] }` (name-sorted); treat non-`complete` lanes as unreported. Then `broadcast_summary` a cross-review digest and `collect_outputs({ "round": 2 })`. Pass `timeout_ms` to bound a slow round.
 5. Unify: dedupe by path+line, merge severities (max wins), map reviewer verdicts.
 
 If team tools are NOT available (single mode), review the diff directly.

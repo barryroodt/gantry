@@ -6,6 +6,7 @@ use futures_util::FutureExt;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use tokio_util::sync::CancellationToken;
 
 const SUBAGENT_MAX_TURNS: u32 = 5;
 
@@ -48,6 +49,10 @@ pub struct SpawnSubagentArgs {
 #[derive(Debug, Deserialize, Serialize)]
 pub struct CollectOutputsArgs {
     pub round: u32,
+    /// Per-call barrier cap. `0` = wait until each subagent reports (bounded by
+    /// the global run timeout / cancellation).
+    #[serde(default)]
+    pub timeout_ms: u64,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -169,8 +174,11 @@ impl SubagentRoster {
                     )
                     .is_err();
 
+                // Always emit one round result so `collect_outputs` can join on
+                // exactly one message per subagent per round (the barrier);
+                // surface assistant_text only for non-empty turns.
+                let _ = find_tx.send(resp.text.clone());
                 if !resp.text.is_empty() {
-                    let _ = find_tx.send(resp.text.clone());
                     let _ = GantryEvent::AssistantText {
                         ts: now_ms(),
                         role: subagent_name.clone(),
@@ -226,16 +234,47 @@ impl SubagentRoster {
         Ok(format!("broadcast to {} subagents", roster.len()))
     }
 
-    pub async fn collect_outputs(&self, _args: CollectOutputsArgs) -> Result<String, String> {
+    /// Round barrier: block until each subagent produces its round report (or
+    /// `timeout_ms` elapses), then return name-sorted structured results. A
+    /// closed channel means the subagent ended without reporting (error, or
+    /// `cancelled` when the run token is tripped).
+    pub async fn collect_outputs(
+        &self,
+        args: CollectOutputsArgs,
+        cancel: &CancellationToken,
+    ) -> Result<String, String> {
         let roster = self.subagents.lock().await;
-        let mut out = String::new();
-        for r in roster.iter() {
+        let mut order: Vec<&SubagentHandle> = roster.iter().collect();
+        order.sort_by(|a, b| a.name.cmp(&b.name));
+        let mut subagents = Vec::with_capacity(order.len());
+        for r in order {
             let mut rx = r.outputs_rx.lock().await;
-            while let Ok(text) = rx.try_recv() {
-                out.push_str(&format!("\n## {} ({})\n{text}\n", r.name, r.role));
-            }
+            let (status, report) = if args.timeout_ms > 0 {
+                match tokio::time::timeout(
+                    std::time::Duration::from_millis(args.timeout_ms),
+                    rx.recv(),
+                )
+                .await
+                {
+                    Ok(Some(text)) => ("complete", text),
+                    Ok(None) if cancel.is_cancelled() => ("cancelled", String::new()),
+                    Ok(None) => ("error", String::new()),
+                    Err(_) => ("timeout", String::new()),
+                }
+            } else {
+                match rx.recv().await {
+                    Some(text) => ("complete", text),
+                    None if cancel.is_cancelled() => ("cancelled", String::new()),
+                    None => ("error", String::new()),
+                }
+            };
+            subagents.push(serde_json::json!({
+                "name": r.name,
+                "status": status,
+                "report": report,
+            }));
         }
-        Ok(out)
+        Ok(serde_json::json!({ "round": args.round, "subagents": subagents }).to_string())
     }
 }
 

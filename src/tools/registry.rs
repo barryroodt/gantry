@@ -130,10 +130,10 @@ impl ToolRegistry {
             },
             ToolSchema {
                 name: "collect_outputs".into(),
-                description: "Collect outputs from spawned subagents.".into(),
+                description: "Barrier: wait for all spawned subagents to report this round (or timeout_ms), then return their name-sorted outputs with per-subagent status.".into(),
                 json_schema: serde_json::json!({
                     "type":"object",
-                    "properties":{"round":{"type":"integer"}},
+                    "properties":{"round":{"type":"integer"},"timeout_ms":{"type":"integer"}},
                     "required":["round"]
                 }),
             },
@@ -284,7 +284,7 @@ impl ToolRegistry {
                     .map_err(|e| ToolError::InvalidInput(e.to_string()))?;
                 let content = team
                     .roster
-                    .collect_outputs(args)
+                    .collect_outputs(args, &team.meter.cancellation_token())
                     .await
                     .map_err(ToolError::InvalidInput)?;
                 Ok(Self::tool_output(content))
