@@ -38,9 +38,18 @@ regex = "1"
 tokio-util = { version = "0.7", features = ["rt"] }
 futures-util = "0.3"
 toml = "0.8"
+pi-ast = { git = "https://github.com/can1357/oh-my-pi", rev = "8b619a2" }
+pi-shell = { git = "https://github.com/can1357/oh-my-pi", rev = "8b619a2" }
 
 [dev-dependencies]
 gantry-evals = { path = "evals" }
 rig-core = "0.37.0"
 tempfile = "3"
 wiremock = "0.6"
+
+# pi-shell pulls the vendored brush engine; oh-my-pi redirects brush-core/builtins
+# to vendored crates via [patch.crates-io], which does NOT transit a git-dep — so
+# we replicate the patch here (points at the same crates in the pinned repo).
+[patch.crates-io]
+brush-core = { git = "https://github.com/can1357/oh-my-pi", rev = "8b619a2" }
+brush-builtins = { git = "https://github.com/can1357/oh-my-pi", rev = "8b619a2" }
