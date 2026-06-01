@@ -1,6 +1,6 @@
 # ADR-0003: Team-mode prompt rewrite
 
-**Status:** Accepted  
+**Status:** Accepted (§3 superseded by ADR-0004; review prompt scaffolding moved into the review profile)  
 **Date:** 2026-05-28  
 **Deciders:** rig-harness phase-0 (task 0.4)
 

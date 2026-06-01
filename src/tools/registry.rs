@@ -18,7 +18,7 @@ pub const BASE_TOOL_NAMES: &[&str] = &[
 ];
 
 /// Tool names available only in team mode (coordinator subagent tools).
-pub const TEAM_TOOL_NAMES: &[&str] = &["spawn_reviewer", "collect_findings", "broadcast_summary"];
+pub const TEAM_TOOL_NAMES: &[&str] = &["spawn_subagent", "collect_outputs", "broadcast_summary"];
 
 /// Tool names exposed for the selected mode: base, plus team tools when `team`.
 pub fn available_tool_names(team: bool) -> Vec<&'static str> {
@@ -30,9 +30,9 @@ pub fn available_tool_names(team: bool) -> Vec<&'static str> {
 }
 
 struct TeamTools {
-    roster: Arc<subagent::ReviewerRoster>,
+    roster: Arc<subagent::SubagentRoster>,
     provider: Arc<dyn ProviderAdapter>,
-    reviewer_system_template: String,
+    subagent_system_template: String,
     meter: Arc<TokenMeter>,
     registry: Weak<ToolRegistry>,
 }
@@ -56,9 +56,9 @@ impl ToolRegistry {
     /// Team-mode registry: standard tools plus coordinator-only subagent tools.
     pub fn team(
         workdir: PathBuf,
-        roster: Arc<subagent::ReviewerRoster>,
+        roster: Arc<subagent::SubagentRoster>,
         provider: Arc<dyn ProviderAdapter>,
-        reviewer_system_template: String,
+        subagent_system_template: String,
         meter: Arc<TokenMeter>,
         allow: Vec<String>,
     ) -> Arc<Self> {
@@ -67,7 +67,7 @@ impl ToolRegistry {
             team: Some(TeamTools {
                 roster,
                 provider,
-                reviewer_system_template,
+                subagent_system_template,
                 meter,
                 registry: weak.clone(),
             }),
@@ -114,23 +114,23 @@ impl ToolRegistry {
     fn team_schemas() -> Vec<ToolSchema> {
         vec![
             ToolSchema {
-                name: "spawn_reviewer".into(),
-                description: "Start one reviewer subagent as a concurrent task.".into(),
+                name: "spawn_subagent".into(),
+                description: "Start one subagent as a concurrent task.".into(),
                 json_schema: serde_json::json!({
                     "type":"object",
                     "properties":{
                         "name":{"type":"string"},
                         "role":{"type":"string"},
                         "template":{"type":"string"},
-                        "diff_scope":{"type":"string"},
+                        "scope":{"type":"string"},
                         "extra_context":{"type":"string"}
                     },
-                    "required":["name","role","template","diff_scope"]
+                    "required":["name","role","template","scope"]
                 }),
             },
             ToolSchema {
-                name: "collect_findings".into(),
-                description: "Collect markdown reports from spawned reviewers.".into(),
+                name: "collect_outputs".into(),
+                description: "Collect outputs from spawned subagents.".into(),
                 json_schema: serde_json::json!({
                     "type":"object",
                     "properties":{"round":{"type":"integer"}},
@@ -139,8 +139,7 @@ impl ToolRegistry {
             },
             ToolSchema {
                 name: "broadcast_summary".into(),
-                description: "Deliver a cross-review digest to all reviewers for refinement."
-                    .into(),
+                description: "Deliver a digest to all subagents for refinement.".into(),
                 json_schema: serde_json::json!({
                     "type":"object",
                     "properties":{
@@ -258,9 +257,9 @@ impl ToolRegistry {
                     .map_err(|e| ToolError::InvalidInput(e.to_string()))?;
                 skill_load::skill_load(&self.workdir, args).await
             }
-            "spawn_reviewer" => {
+            "spawn_subagent" => {
                 let team = self.team_tools()?;
-                let args: subagent::SpawnReviewerArgs = serde_json::from_str(args_json)
+                let args: subagent::SpawnSubagentArgs = serde_json::from_str(args_json)
                     .map_err(|e| ToolError::InvalidInput(e.to_string()))?;
                 let registry = team
                     .registry
@@ -268,24 +267,24 @@ impl ToolRegistry {
                     .ok_or_else(|| ToolError::InvalidInput("team registry unavailable".into()))?;
                 let content = team
                     .roster
-                    .spawn_reviewer(
+                    .spawn_subagent(
                         args,
                         team.provider.clone(),
                         registry,
-                        team.reviewer_system_template.clone(),
+                        team.subagent_system_template.clone(),
                         team.meter.clone(),
                     )
                     .await
                     .map_err(ToolError::InvalidInput)?;
                 Ok(Self::tool_output(content))
             }
-            "collect_findings" => {
+            "collect_outputs" => {
                 let team = self.team_tools()?;
-                let args: subagent::CollectFindingsArgs = serde_json::from_str(args_json)
+                let args: subagent::CollectOutputsArgs = serde_json::from_str(args_json)
                     .map_err(|e| ToolError::InvalidInput(e.to_string()))?;
                 let content = team
                     .roster
-                    .collect_findings(args)
+                    .collect_outputs(args)
                     .await
                     .map_err(ToolError::InvalidInput)?;
                 Ok(Self::tool_output(content))

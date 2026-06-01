@@ -4,7 +4,7 @@ use crate::meter::TokenMeter;
 use crate::mode::ModeRunOutcome;
 use crate::provider::{build_adapter, ChatMessage, ProviderAdapter, ToolResult};
 use crate::skills::SkillLoader;
-use crate::tools::subagent::{CollectFindingsArgs, ReviewerRoster};
+use crate::tools::subagent::{CollectOutputsArgs, SubagentRoster};
 use crate::tools::ToolRegistry;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
@@ -17,11 +17,11 @@ pub struct TeamMode {
     pub meter: Arc<TokenMeter>,
     pub cancel: CancellationToken,
     pub registry: Arc<ToolRegistry>,
-    pub roster: Arc<ReviewerRoster>,
+    pub roster: Arc<SubagentRoster>,
     pub skill_loader: SkillLoader,
     pub provider: Arc<dyn ProviderAdapter>,
     pub prompt: String,
-    pub spawned_reviewers: u32,
+    pub spawned_subagents: u32,
 }
 
 impl TeamMode {
@@ -113,18 +113,18 @@ impl TeamMode {
                     .dispatch(COORDINATOR_ROLE, turn, &call.name, &call.args_json)
                     .await;
 
-                if call.name == "spawn_reviewer" && out.content.contains("reviewer spawned:") {
-                    self.spawned_reviewers += 1;
+                if call.name == "spawn_subagent" && out.content.contains("subagent spawned:") {
+                    self.spawned_subagents += 1;
                 }
-                if call.name == "collect_findings" {
+                if call.name == "collect_outputs" {
                     out.content = self
-                        .finalize_collect_findings(&call.args_json, out.content)
+                        .finalize_collect_outputs(&call.args_json, out.content)
                         .await;
                     if self.team_collapsed(&out.content) {
                         let _ = GantryEvent::Error {
                             ts: now_ms(),
                             kind: ErrorKind::TeamCollapse,
-                            message: "all reviewers crashed or produced no findings".into(),
+                            message: "all subagents crashed or produced no output".into(),
                         }
                         .emit();
                         return ExitCode::Error;
@@ -149,21 +149,21 @@ impl TeamMode {
         ExitCode::Ok
     }
 
-    async fn finalize_collect_findings(&self, args_json: &str, initial: String) -> String {
-        if !initial.trim().is_empty() || self.spawned_reviewers == 0 {
+    async fn finalize_collect_outputs(&self, args_json: &str, initial: String) -> String {
+        if !initial.trim().is_empty() || self.spawned_subagents == 0 {
             return initial;
         }
 
         tokio::time::sleep(std::time::Duration::from_millis(150)).await;
 
-        let Ok(args) = serde_json::from_str::<CollectFindingsArgs>(args_json) else {
+        let Ok(args) = serde_json::from_str::<CollectOutputsArgs>(args_json) else {
             return initial;
         };
-        self.roster.collect_findings(args).await.unwrap_or(initial)
+        self.roster.collect_outputs(args).await.unwrap_or(initial)
     }
 
     fn team_collapsed(&self, collect_output: &str) -> bool {
-        self.spawned_reviewers > 0 && collect_output.trim().is_empty()
+        self.spawned_subagents > 0 && collect_output.trim().is_empty()
     }
 }
 
@@ -211,7 +211,7 @@ pub async fn run_team(validated: Validated) -> ModeRunOutcome {
         }
     };
 
-    let roster = Arc::new(ReviewerRoster::new());
+    let roster = Arc::new(SubagentRoster::new());
     let registry = ToolRegistry::team(
         validated.workdir.clone(),
         roster.clone(),
@@ -234,7 +234,7 @@ pub async fn run_team(validated: Validated) -> ModeRunOutcome {
         skill_loader,
         provider,
         prompt,
-        spawned_reviewers: 0,
+        spawned_subagents: 0,
     }
     .run()
     .await;

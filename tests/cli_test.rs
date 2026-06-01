@@ -465,7 +465,7 @@ fn team_tool_rejected_in_single_mode() {
         "--timeout-ms",
         "60000",
         "--tool",
-        "spawn_reviewer",
+        "spawn_subagent",
     ])
     .unwrap_err();
 
@@ -495,13 +495,13 @@ fn team_tool_allowed_in_team_mode() {
         "--timeout-ms",
         "60000",
         "--tool",
-        "spawn_reviewer",
+        "spawn_subagent",
         "--tool",
         "read_file",
     ])
     .expect("parse_and_validate");
 
-    assert_eq!(validated.tools, ["spawn_reviewer", "read_file"]);
+    assert_eq!(validated.tools, ["spawn_subagent", "read_file"]);
 }
 
 #[test]

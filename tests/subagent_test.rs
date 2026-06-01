@@ -8,7 +8,7 @@ use gantry::emitter::TestEmitterGuard;
 use gantry::events::GantryEvent;
 use gantry::meter::TokenMeter;
 use gantry::provider::{ChatMessage, ProviderAdapter, ProviderResponse, ToolSchema};
-use gantry::tools::subagent::ReviewerRoster;
+use gantry::tools::subagent::SubagentRoster;
 use gantry::tools::ToolRegistry;
 use tempfile::TempDir;
 
@@ -66,7 +66,7 @@ impl ProviderAdapter for RoleTextProvider {
             .unwrap_or_else(|| "unknown".into());
 
         if role == "panic-role" {
-            panic!("reviewer task panic");
+            panic!("subagent task panic");
         }
 
         let round_index = messages
@@ -96,10 +96,10 @@ impl ProviderAdapter for RoleTextProvider {
 }
 
 #[tokio::test]
-async fn spawn_reviewer_adds_to_roster_and_emits_subagent_spawn() {
+async fn spawn_subagent_adds_to_roster_and_emits_subagent_spawn() {
     let guard = TestEmitterGuard::install();
     let dir = TempDir::new().unwrap();
-    let roster = Arc::new(ReviewerRoster::new());
+    let roster = Arc::new(SubagentRoster::new());
     let provider =
         Arc::new(RoleTextProvider::new().with_role("correctness", vec!["round-1 report"]));
     let registry = ToolRegistry::team(
@@ -115,13 +115,13 @@ async fn spawn_reviewer_adds_to_roster_and_emits_subagent_spawn() {
         .dispatch(
             "coordinator",
             1,
-            "spawn_reviewer",
-            r#"{"name":"correctness","role":"correctness","template":"correctness","diff_scope":"full"}"#,
+            "spawn_subagent",
+            r#"{"name":"correctness","role":"correctness","template":"correctness","scope":"full"}"#,
         )
         .await;
 
-    assert!(out.content.contains("reviewer spawned: correctness"));
-    assert_eq!(roster.reviewers.lock().await.len(), 1);
+    assert!(out.content.contains("subagent spawned: correctness"));
+    assert_eq!(roster.subagents.lock().await.len(), 1);
 
     tokio::time::sleep(Duration::from_millis(100)).await;
 
@@ -140,9 +140,9 @@ async fn team_registry_exposes_nine_tools_single_mode_exposes_six() {
     let dir = TempDir::new().unwrap();
     let single = ToolRegistry::new(dir.path().to_path_buf(), vec![]);
     assert_eq!(single.schemas().len(), 6);
-    assert!(!single.schemas().iter().any(|s| s.name == "spawn_reviewer"));
+    assert!(!single.schemas().iter().any(|s| s.name == "spawn_subagent"));
 
-    let roster = Arc::new(ReviewerRoster::new());
+    let roster = Arc::new(SubagentRoster::new());
     let provider = Arc::new(RoleTextProvider::new());
     let team = ToolRegistry::team(
         dir.path().to_path_buf(),
@@ -155,15 +155,15 @@ async fn team_registry_exposes_nine_tools_single_mode_exposes_six() {
     assert_eq!(team.schemas().len(), 9);
     let schemas = team.schemas();
     let names: Vec<&str> = schemas.iter().map(|s| s.name.as_str()).collect();
-    assert!(names.contains(&"spawn_reviewer"));
-    assert!(names.contains(&"collect_findings"));
+    assert!(names.contains(&"spawn_subagent"));
+    assert!(names.contains(&"collect_outputs"));
     assert!(names.contains(&"broadcast_summary"));
 }
 
 #[tokio::test]
-async fn broadcast_summary_delivers_to_all_spawned_reviewers() {
+async fn broadcast_summary_delivers_to_all_spawned_subagents() {
     let dir = TempDir::new().unwrap();
-    let roster = Arc::new(ReviewerRoster::new());
+    let roster = Arc::new(SubagentRoster::new());
     let provider = Arc::new(
         RoleTextProvider::new()
             .with_role(
@@ -188,23 +188,23 @@ async fn broadcast_summary_delivers_to_all_spawned_reviewers() {
         .dispatch(
             "coordinator",
             1,
-            "spawn_reviewer",
-            r#"{"name":"correctness","role":"correctness","template":"correctness","diff_scope":"full"}"#,
+            "spawn_subagent",
+            r#"{"name":"correctness","role":"correctness","template":"correctness","scope":"full"}"#,
         )
         .await;
     registry
         .dispatch(
             "coordinator",
             1,
-            "spawn_reviewer",
-            r#"{"name":"spec-compliance","role":"spec-compliance","template":"spec-compliance","diff_scope":"full"}"#,
+            "spawn_subagent",
+            r#"{"name":"spec-compliance","role":"spec-compliance","template":"spec-compliance","scope":"full"}"#,
         )
         .await;
 
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     let round1 = registry
-        .dispatch("coordinator", 2, "collect_findings", r#"{"round":1}"#)
+        .dispatch("coordinator", 2, "collect_outputs", r#"{"round":1}"#)
         .await;
     assert!(round1.content.contains("first correctness"));
     assert!(round1.content.contains("first spec"));
@@ -217,21 +217,21 @@ async fn broadcast_summary_delivers_to_all_spawned_reviewers() {
             r#"{"round":1,"summary":"cross-review digest"}"#,
         )
         .await;
-    assert!(broadcast.content.contains("broadcast to 2 reviewers"));
+    assert!(broadcast.content.contains("broadcast to 2 subagents"));
 
     tokio::time::sleep(Duration::from_millis(150)).await;
 
     let round2 = registry
-        .dispatch("coordinator", 4, "collect_findings", r#"{"round":2}"#)
+        .dispatch("coordinator", 4, "collect_outputs", r#"{"round":2}"#)
         .await;
     assert!(round2.content.contains("after broadcast correctness"));
     assert!(round2.content.contains("after broadcast spec"));
 }
 
 #[tokio::test]
-async fn collect_findings_drains_text_from_finished_reviewers_in_order() {
+async fn collect_outputs_drains_text_from_finished_subagents_in_order() {
     let dir = TempDir::new().unwrap();
-    let roster = Arc::new(ReviewerRoster::new());
+    let roster = Arc::new(SubagentRoster::new());
     let provider = Arc::new(
         RoleTextProvider::new()
             .with_role("alpha", vec!["alpha report"])
@@ -250,23 +250,23 @@ async fn collect_findings_drains_text_from_finished_reviewers_in_order() {
         .dispatch(
             "coordinator",
             1,
-            "spawn_reviewer",
-            r#"{"name":"alpha","role":"alpha","template":"alpha","diff_scope":"full"}"#,
+            "spawn_subagent",
+            r#"{"name":"alpha","role":"alpha","template":"alpha","scope":"full"}"#,
         )
         .await;
     registry
         .dispatch(
             "coordinator",
             1,
-            "spawn_reviewer",
-            r#"{"name":"beta","role":"beta","template":"beta","diff_scope":"full"}"#,
+            "spawn_subagent",
+            r#"{"name":"beta","role":"beta","template":"beta","scope":"full"}"#,
         )
         .await;
 
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     let out = registry
-        .dispatch("coordinator", 2, "collect_findings", r#"{"round":1}"#)
+        .dispatch("coordinator", 2, "collect_outputs", r#"{"round":1}"#)
         .await;
 
     let alpha_pos = out.content.find("alpha report").expect("alpha report");
@@ -281,7 +281,7 @@ async fn collect_findings_drains_text_from_finished_reviewers_in_order() {
 #[tokio::test]
 async fn partial_failure_one_reviewer_panics_broadcast_and_collect_still_work() {
     let dir = TempDir::new().unwrap();
-    let roster = Arc::new(ReviewerRoster::new());
+    let roster = Arc::new(SubagentRoster::new());
     let provider = Arc::new(
         RoleTextProvider::new()
             .with_role("panic-role", vec!["never emitted"])
@@ -300,23 +300,23 @@ async fn partial_failure_one_reviewer_panics_broadcast_and_collect_still_work() 
         .dispatch(
             "coordinator",
             1,
-            "spawn_reviewer",
-            r#"{"name":"broken","role":"panic-role","template":"panic-role","diff_scope":"full"}"#,
+            "spawn_subagent",
+            r#"{"name":"broken","role":"panic-role","template":"panic-role","scope":"full"}"#,
         )
         .await;
     registry
         .dispatch(
             "coordinator",
             1,
-            "spawn_reviewer",
-            r#"{"name":"healthy","role":"healthy","template":"healthy","diff_scope":"full"}"#,
+            "spawn_subagent",
+            r#"{"name":"healthy","role":"healthy","template":"healthy","scope":"full"}"#,
         )
         .await;
 
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     let round1 = registry
-        .dispatch("coordinator", 2, "collect_findings", r#"{"round":1}"#)
+        .dispatch("coordinator", 2, "collect_outputs", r#"{"round":1}"#)
         .await;
     assert!(round1.content.contains("healthy round 1"));
     assert!(!round1.content.contains("never emitted"));
@@ -329,12 +329,12 @@ async fn partial_failure_one_reviewer_panics_broadcast_and_collect_still_work() 
             r#"{"round":1,"summary":"digest"}"#,
         )
         .await;
-    assert!(broadcast.content.contains("broadcast to 2 reviewers"));
+    assert!(broadcast.content.contains("broadcast to 2 subagents"));
 
     tokio::time::sleep(Duration::from_millis(150)).await;
 
     let round2 = registry
-        .dispatch("coordinator", 4, "collect_findings", r#"{"round":2}"#)
+        .dispatch("coordinator", 4, "collect_outputs", r#"{"round":2}"#)
         .await;
     assert!(round2.content.contains("healthy round 2"));
 }
@@ -346,8 +346,8 @@ async fn single_mode_rejects_subagent_tools() {
         .dispatch(
             "coordinator",
             1,
-            "spawn_reviewer",
-            r#"{"name":"x","role":"x","template":"x","diff_scope":"full"}"#,
+            "spawn_subagent",
+            r#"{"name":"x","role":"x","template":"x","scope":"full"}"#,
         )
         .await;
     assert!(

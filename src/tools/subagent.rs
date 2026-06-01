@@ -7,21 +7,21 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-const REVIEWER_MAX_TURNS: u32 = 5;
+const SUBAGENT_MAX_TURNS: u32 = 5;
 
 /// Assemble a reviewer subagent's system prompt per ADR-0003 §3: security
 /// constraints, role focus, output-format contract, scoped-diff instruction,
 /// optional extra context, and CI context (plus the conventions override).
-fn build_reviewer_system_prompt(
+fn build_subagent_system_prompt(
     base: &str,
     role: &str,
-    diff_scope: &str,
+    scope: &str,
     extra_context: Option<&str>,
 ) -> String {
-    let scope_clause = if diff_scope == "full" || diff_scope.is_empty() {
+    let scope_clause = if scope == "full" || scope.is_empty() {
         "git diff {{DIFF_RANGE}}".to_string()
     } else {
-        format!("git diff {{{{DIFF_RANGE}}}} -- {diff_scope}")
+        format!("git diff {{{{DIFF_RANGE}}}} -- {scope}")
     };
 
     let mut prompt = String::new();
@@ -65,17 +65,17 @@ broadcast later; amend or withdraw findings in your follow-up report.",
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-pub struct SpawnReviewerArgs {
+pub struct SpawnSubagentArgs {
     pub name: String,
     pub role: String,     // "correctness" | "conventions" | etc.
     pub template: String, // template skill name
-    pub diff_scope: String,
+    pub scope: String,
     #[serde(default)]
     pub extra_context: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-pub struct CollectFindingsArgs {
+pub struct CollectOutputsArgs {
     pub round: u32,
 }
 
@@ -85,30 +85,30 @@ pub struct BroadcastSummaryArgs {
     pub summary: String,
 }
 
-/// Reviewer state held by the coordinator. spawn_reviewer adds to roster;
-/// collect_findings drains assistant_text per reviewer; broadcast_summary feeds
-/// summary back to all reviewers as a user-turn for round 2.
-pub struct ReviewerRoster {
-    pub reviewers: Mutex<Vec<ReviewerHandle>>,
+/// Reviewer state held by the coordinator. spawn_subagent adds to roster;
+/// collect_outputs drains assistant_text per reviewer; broadcast_summary feeds
+/// summary back to all subagents as a user-turn for round 2.
+pub struct SubagentRoster {
+    pub subagents: Mutex<Vec<SubagentHandle>>,
 }
 
-pub struct ReviewerHandle {
+pub struct SubagentHandle {
     pub name: String,
     pub role: String,
     pub messages_tx: tokio::sync::mpsc::UnboundedSender<String>,
-    pub findings_rx: tokio::sync::Mutex<tokio::sync::mpsc::UnboundedReceiver<String>>,
+    pub outputs_rx: tokio::sync::Mutex<tokio::sync::mpsc::UnboundedReceiver<String>>,
 }
 
-impl ReviewerRoster {
+impl SubagentRoster {
     pub fn new() -> Self {
         Self {
-            reviewers: Mutex::new(Vec::new()),
+            subagents: Mutex::new(Vec::new()),
         }
     }
 
-    pub async fn spawn_reviewer(
+    pub async fn spawn_subagent(
         &self,
-        args: SpawnReviewerArgs,
+        args: SpawnSubagentArgs,
         provider: Arc<dyn ProviderAdapter>,
         _registry: Arc<ToolRegistry>,
         system_template: String,
@@ -123,16 +123,16 @@ impl ReviewerRoster {
             ts: now_ms(),
             name: name.clone(),
             template: args.template.clone(),
-            scope: args.diff_scope.clone(),
+            scope: args.scope.clone(),
         }
         .emit();
 
-        let reviewer_name = name.clone();
+        let subagent_name = name.clone();
         let cancel = meter.cancellation_token();
-        let reviewer_system = build_reviewer_system_prompt(
+        let subagent_system = build_subagent_system_prompt(
             &system_template,
             &args.role,
-            &args.diff_scope,
+            &args.scope,
             args.extra_context.as_deref(),
         );
         tokio::spawn(async move {
@@ -141,7 +141,7 @@ impl ReviewerRoster {
             let mut messages: Vec<ChatMessage> = vec![ChatMessage::User(format!(
                 "Role: {role}\nDiff scope: {scope}\nReview using template: {template}",
                 role = args.role,
-                scope = args.diff_scope,
+                scope = args.scope,
                 template = args.template,
             ))];
             let mut turn: u32 = 0;
@@ -156,7 +156,7 @@ impl ReviewerRoster {
                 // Catch panics so a single reviewer cannot take down the run;
                 // surface them as `subagent_failed` (invariant #5).
                 let attempt = std::panic::AssertUnwindSafe(provider.complete(
-                    &reviewer_system,
+                    &subagent_system,
                     &messages,
                     &[],
                 ))
@@ -168,7 +168,7 @@ impl ReviewerRoster {
                     Ok(Err(err)) => {
                         let _ = GantryEvent::SubagentFailed {
                             ts: now_ms(),
-                            name: reviewer_name.clone(),
+                            name: subagent_name.clone(),
                             reason: err.to_string(),
                         }
                         .emit();
@@ -177,8 +177,8 @@ impl ReviewerRoster {
                     Err(_panic) => {
                         let _ = GantryEvent::SubagentFailed {
                             ts: now_ms(),
-                            name: reviewer_name.clone(),
-                            reason: "reviewer task panicked".into(),
+                            name: subagent_name.clone(),
+                            reason: "subagent task panicked".into(),
                         }
                         .emit();
                         break;
@@ -202,7 +202,7 @@ impl ReviewerRoster {
                     let _ = find_tx.send(resp.text.clone());
                     let _ = GantryEvent::AssistantText {
                         ts: now_ms(),
-                        role: reviewer_name.clone(),
+                        role: subagent_name.clone(),
                         text: resp.text.clone(),
                     }
                     .emit();
@@ -221,14 +221,14 @@ impl ReviewerRoster {
                     Some(next) => messages.push(ChatMessage::User(next)),
                     None => break,
                 }
-                if turn >= REVIEWER_MAX_TURNS {
+                if turn >= SUBAGENT_MAX_TURNS {
                     break;
                 }
             }
 
             let _ = GantryEvent::SubagentDone {
                 ts: now_ms(),
-                name: reviewer_name,
+                name: subagent_name,
                 turns: turn,
                 input_tokens,
                 output_tokens,
@@ -236,30 +236,30 @@ impl ReviewerRoster {
             .emit();
         });
 
-        self.reviewers.lock().await.push(ReviewerHandle {
+        self.subagents.lock().await.push(SubagentHandle {
             name: name.clone(),
             role,
             messages_tx: msg_tx,
-            findings_rx: tokio::sync::Mutex::new(find_rx),
+            outputs_rx: tokio::sync::Mutex::new(find_rx),
         });
-        Ok(format!("reviewer spawned: {name}"))
+        Ok(format!("subagent spawned: {name}"))
     }
 
     pub async fn broadcast_summary(&self, args: BroadcastSummaryArgs) -> Result<String, String> {
-        let roster = self.reviewers.lock().await;
+        let roster = self.subagents.lock().await;
         for r in roster.iter() {
             let _ = r
                 .messages_tx
                 .send(format!("Round {} summary:\n{}", args.round, args.summary));
         }
-        Ok(format!("broadcast to {} reviewers", roster.len()))
+        Ok(format!("broadcast to {} subagents", roster.len()))
     }
 
-    pub async fn collect_findings(&self, _args: CollectFindingsArgs) -> Result<String, String> {
-        let roster = self.reviewers.lock().await;
+    pub async fn collect_outputs(&self, _args: CollectOutputsArgs) -> Result<String, String> {
+        let roster = self.subagents.lock().await;
         let mut out = String::new();
         for r in roster.iter() {
-            let mut rx = r.findings_rx.lock().await;
+            let mut rx = r.outputs_rx.lock().await;
             while let Ok(text) = rx.try_recv() {
                 out.push_str(&format!("\n## {} ({})\n{text}\n", r.name, r.role));
             }
@@ -268,7 +268,7 @@ impl ReviewerRoster {
     }
 }
 
-impl Default for ReviewerRoster {
+impl Default for SubagentRoster {
     fn default() -> Self {
         Self::new()
     }
