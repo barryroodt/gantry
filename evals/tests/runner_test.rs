@@ -105,7 +105,6 @@ fn minimal_fixture_layout_is_valid() {
 }
 
 #[tokio::test]
-#[ignore = "blocked on team code-context injection (SP2/SP4): compose refuses without the diff; orchestration mechanics are covered by team_mode_test"]
 async fn team_fixture_003_runs_live() {
     let Some(binary) = gantry_binary() else {
         eprintln!("skipping team_fixture_003_runs_live: gantry binary not built");
@@ -116,11 +115,9 @@ async fn team_fixture_003_runs_live() {
         return;
     }
 
-    // Live end-to-end team run. BLOCKED for now: team mode does not yet feed the
-    // diff/files to the (toolless) coordinator + subagents, so `compose` refuses
-    // without context (ADR-0005 known limitation; deferred to SP2/SP4). The
-    // orchestration mechanics are covered deterministically by team_mode_test.
-    // Remove the #[ignore] above once code-context injection lands.
+    // Live end-to-end team run on the real fixture: compose → spawned reviewers
+    // read the diff with their tools → unify. run_all asserts the contract
+    // (exit ok, one subagent_done per spawn before the single JSON fence, ≥1 finding).
     let fixture =
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("fixtures/003-team-mode-multi-dir");
     let runner = FixtureRunner {
