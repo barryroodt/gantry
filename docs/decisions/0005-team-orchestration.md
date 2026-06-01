@@ -70,17 +70,15 @@ The number of review rounds is decided by the **harness**, not hardcoded in the 
 ## Implementation
 After this ADR, implement via the orchestration plan (scratchpad), sequenced after Change 2 (done) and reconciled with SP3 so the loop driver is shared. Validation: `cargo test` unit coverage of the state machine + the `003-team-mode` eval asserting one `subagent_done` per spawned subagent before the unify fence, and exactly one valid JSON fence.
 
-## Known limitation (2026-05-31): the team is blind to the code
+## Known limitation (2026-05-31) — RESOLVED 2026-05-31
 
-Live validation against a real model surfaced that this inversion left team mode
-without access to the code under review. The coordinator no longer has a tool
-loop and subagents run toolless, and the harness does **not** inject the diff or
-files into the `compose` / subagent prompts. So `compose` refuses ("I need the
-diff …") and no grounded review is possible. The orchestration **mechanics** are
-validated (deterministic `team_mode_test` coverage of
-compose→spawn→barrier→unify→fence + lifecycle; the live plumbing reaches the
-model call), but a grounded live review is **deferred to SP2/SP4**: feed the team
-its review context — inject the diff / changed-files, or give subagents
-`read_file` / `git_diff` — and rework eval fixture `003` (which applies its patch
-to a non-git dir) into a real git repo. `team_fixture_003_runs_live` is
-`#[ignore]`d until then.
+This inversion initially left team mode blind: the coordinator has no tool loop
+and subagents ran toolless, with nothing injecting the code, so `compose` refused
+("I need the diff …"). **Resolved** via the generic tools mechanism (spec
+`docs/superpowers/specs/2026-05-31-team-review-context-design.md`, plan
+`docs/superpowers/plans/2026-05-31-team-review-context.md`): subagents now run a
+bounded per-round tool loop with the profile's toolset (`registry.schemas()` +
+`dispatch`), `compose` plans the team without a diff, and eval fixture `003` is a
+real git repo. The `team_fixture_003_runs_live` eval — no longer `#[ignore]`d —
+passes a grounded review live. The harness stays domain-agnostic; review's diff
+access is just `git_diff` in the review profile's toolset.
