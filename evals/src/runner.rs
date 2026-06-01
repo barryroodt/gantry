@@ -91,16 +91,22 @@ async fn run_fixture(binary: &Path, dir: &Path) -> Result<FixtureResult> {
     let patch = dir.join("diff.patch");
     let prompt_file = dir.join("prompt.txt");
 
-    // Apply patch (idempotent: assume tests run in isolated tmpcopy of repo).
+    // Set up a real git repo so subagents' `git_diff` shows the patch as the
+    // changes under review (mirrors real usage: a repo with uncommitted work).
     let tmpdir = tempfile::tempdir()?;
     copy_dir_recursive(&repo, tmpdir.path())?;
+    let git = |args: &[&str]| {
+        let mut c = Command::new("git");
+        c.args(args).current_dir(tmpdir.path());
+        c
+    };
+    git(&["init", "-q"]).output().await?;
+    git(&["config", "user.email", "eval@gantry.test"]).output().await?;
+    git(&["config", "user.name", "gantry-eval"]).output().await?;
+    git(&["add", "-A"]).output().await?;
+    git(&["commit", "-q", "-m", "base"]).output().await?;
     if patch.exists() {
-        Command::new("git")
-            .arg("apply")
-            .arg(&patch)
-            .current_dir(tmpdir.path())
-            .output()
-            .await?;
+        git(&["apply", patch.to_str().unwrap()]).output().await?;
     }
 
     // Per-fixture token cap (spec): the budget-trip fixture trips at a low cap
