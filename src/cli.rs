@@ -220,23 +220,32 @@ impl Cli {
                     .and_then(|p| p.subagent_system_prompt.clone()),
             };
 
+        let available = crate::tools::registry::available_tool_names(mode == Mode::Team);
         let tools = if self.tools.is_empty() {
+            // Profile tools are a cross-mode template: keep only those available
+            // in the active mode (e.g. team tools are dropped in single mode).
             profile
                 .as_ref()
-                .map(|p| p.tools.clone())
+                .map(|p| {
+                    p.tools
+                        .iter()
+                        .filter(|t| available.contains(&t.as_str()))
+                        .cloned()
+                        .collect()
+                })
                 .unwrap_or_default()
         } else {
+            // Explicit --tool flags are validated strictly.
+            for tool in &self.tools {
+                if !available.contains(&tool.as_str()) {
+                    return Err(ConfigError::UnknownTool {
+                        name: tool.clone(),
+                        available: available.join(", "),
+                    });
+                }
+            }
             self.tools
         };
-        let available = crate::tools::registry::available_tool_names(mode == Mode::Team);
-        for tool in &tools {
-            if !available.contains(&tool.as_str()) {
-                return Err(ConfigError::UnknownTool {
-                    name: tool.clone(),
-                    available: available.join(", "),
-                });
-            }
-        }
 
         let inject_skills = if self.inject_skills.is_empty() {
             profile

@@ -666,3 +666,64 @@ fn missing_profile_manifest_returns_error() {
     .unwrap_err();
     assert!(matches!(err, ConfigError::Profile(_)), "got {err:?}");
 }
+
+#[test]
+fn review_profile_single_mode_drops_team_tools() {
+    let workdir = temp_workdir("review-single");
+    let prompt = write_prompt_file(&workdir, "prompt.txt", "hello");
+    let review = concat!(env!("CARGO_MANIFEST_DIR"), "/profiles/review");
+
+    let validated = Cli::parse_and_validate_from([
+        "gantry",
+        "--mode",
+        "single",
+        "--model",
+        "openai/gpt-4o",
+        "--workdir",
+        workdir.to_str().unwrap(),
+        "--prompt-file",
+        prompt.to_str().unwrap(),
+        "--max-tokens",
+        "8192",
+        "--timeout-ms",
+        "60000",
+        "--profile",
+        review,
+    ])
+    .expect("single-mode review profile validates");
+
+    assert!(
+        !validated.tools.iter().any(|t| t == "spawn_subagent"),
+        "team tool leaked into single mode: {:?}",
+        validated.tools
+    );
+    assert!(validated.tools.iter().any(|t| t == "read_file"));
+    assert_eq!(validated.mode, Mode::Single);
+}
+
+#[test]
+fn review_profile_team_mode_keeps_team_tools() {
+    let workdir = temp_workdir("review-team");
+    let prompt = write_prompt_file(&workdir, "prompt.txt", "hello");
+    let review = concat!(env!("CARGO_MANIFEST_DIR"), "/profiles/review");
+
+    let validated = Cli::parse_and_validate_from([
+        "gantry",
+        "--model",
+        "openai/gpt-4o",
+        "--workdir",
+        workdir.to_str().unwrap(),
+        "--prompt-file",
+        prompt.to_str().unwrap(),
+        "--max-tokens",
+        "8192",
+        "--timeout-ms",
+        "60000",
+        "--profile",
+        review,
+    ])
+    .expect("team-mode review profile validates");
+
+    assert_eq!(validated.mode, Mode::Team);
+    assert!(validated.tools.iter().any(|t| t == "spawn_subagent"));
+}
