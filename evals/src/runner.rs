@@ -101,8 +101,12 @@ async fn run_fixture(binary: &Path, dir: &Path) -> Result<FixtureResult> {
         c
     };
     git(&["init", "-q"]).output().await?;
-    git(&["config", "user.email", "eval@gantry.test"]).output().await?;
-    git(&["config", "user.name", "gantry-eval"]).output().await?;
+    git(&["config", "user.email", "eval@gantry.test"])
+        .output()
+        .await?;
+    git(&["config", "user.name", "gantry-eval"])
+        .output()
+        .await?;
     git(&["add", "-A"]).output().await?;
     git(&["commit", "-q", "-m", "base"]).output().await?;
     if patch.exists() {

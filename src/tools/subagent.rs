@@ -141,10 +141,13 @@ impl SubagentRoster {
                 let mut report = String::new();
                 for _ in 0..SUBAGENT_MAX_TOOL_TURNS {
                     // Catch panics so one subagent cannot take down the run (invariant #5).
-                    let attempt =
-                        std::panic::AssertUnwindSafe(provider.complete(&subagent_system, &messages, &tools))
-                            .catch_unwind()
-                            .await;
+                    let attempt = std::panic::AssertUnwindSafe(provider.complete(
+                        &subagent_system,
+                        &messages,
+                        &tools,
+                    ))
+                    .catch_unwind()
+                    .await;
                     let resp = match attempt {
                         Ok(Ok(resp)) => resp,
                         Ok(Err(err)) => {
@@ -171,7 +174,12 @@ impl SubagentRoster {
                     input_tokens += resp.input_tokens;
                     output_tokens += resp.output_tokens;
                     if meter
-                        .add(resp.input_tokens, resp.output_tokens, resp.cache_read, resp.cache_write)
+                        .add(
+                            resp.input_tokens,
+                            resp.output_tokens,
+                            resp.cache_read,
+                            resp.cache_write,
+                        )
                         .is_err()
                     {
                         stop = true;

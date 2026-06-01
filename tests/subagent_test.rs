@@ -8,7 +8,9 @@ use gantry::cli::Provider;
 use gantry::emitter::TestEmitterGuard;
 use gantry::events::GantryEvent;
 use gantry::meter::TokenMeter;
-use gantry::provider::{ChatMessage, ProviderAdapter, ProviderResponse, ToolCallRequest, ToolSchema};
+use gantry::provider::{
+    ChatMessage, ProviderAdapter, ProviderResponse, ToolCallRequest, ToolSchema,
+};
 use gantry::tools::subagent::{
     BroadcastSummaryArgs, CollectOutputsArgs, SpawnSubagentArgs, SubagentRoster,
 };
@@ -456,7 +458,10 @@ impl ProviderAdapter for ToolThenReportProvider {
         _tools: &[ToolSchema],
     ) -> anyhow::Result<ProviderResponse> {
         if let Some(ChatMessage::ToolResults(results)) = messages.last() {
-            let seen = results.first().map(|r| r.content.clone()).unwrap_or_default();
+            let seen = results
+                .first()
+                .map(|r| r.content.clone())
+                .unwrap_or_default();
             return Ok(ProviderResponse {
                 text: format!("report: {seen}"),
                 tool_calls: vec![],
@@ -494,7 +499,13 @@ async fn subagent_tool_loop_dispatches_and_reports_result() {
     spawn_reviewer(&roster, &provider, &registry, &meter, "alpha", "alpha").await;
 
     let round1 = roster
-        .collect_outputs(CollectOutputsArgs { round: 1, timeout_ms: 0 }, &shared_token())
+        .collect_outputs(
+            CollectOutputsArgs {
+                round: 1,
+                timeout_ms: 0,
+            },
+            &shared_token(),
+        )
         .await
         .unwrap();
     assert!(
