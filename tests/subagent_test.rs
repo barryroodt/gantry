@@ -8,7 +8,7 @@ use gantry::cli::Provider;
 use gantry::emitter::TestEmitterGuard;
 use gantry::events::GantryEvent;
 use gantry::meter::TokenMeter;
-use gantry::provider::{ChatMessage, ProviderAdapter, ProviderResponse, ToolSchema};
+use gantry::provider::{ChatMessage, ProviderAdapter, ProviderResponse, ToolCallRequest, ToolSchema};
 use gantry::tools::subagent::{
     BroadcastSummaryArgs, CollectOutputsArgs, SpawnSubagentArgs, SubagentRoster,
 };
@@ -433,5 +433,72 @@ async fn collect_outputs_times_out_slow_subagent() {
     assert!(
         out.contains(r#""status":"timeout""#),
         "expected timeout status: {out}"
+    );
+}
+
+/// Calls `read_file` on the first turn, then (once the tool result arrives)
+/// reports the content it received back — proving the subagent dispatched the
+/// tool and fed the result into its next turn.
+struct ToolThenReportProvider;
+
+#[async_trait]
+impl ProviderAdapter for ToolThenReportProvider {
+    fn provider(&self) -> Provider {
+        Provider::OpenAi
+    }
+    fn model(&self) -> &str {
+        "gpt-tooluse"
+    }
+    async fn complete(
+        &self,
+        _system: &str,
+        messages: &[ChatMessage],
+        _tools: &[ToolSchema],
+    ) -> anyhow::Result<ProviderResponse> {
+        if let Some(ChatMessage::ToolResults(results)) = messages.last() {
+            let seen = results.first().map(|r| r.content.clone()).unwrap_or_default();
+            return Ok(ProviderResponse {
+                text: format!("report: {seen}"),
+                tool_calls: vec![],
+                input_tokens: 1,
+                output_tokens: 1,
+                cache_read: 0,
+                cache_write: 0,
+            });
+        }
+        Ok(ProviderResponse {
+            text: String::new(),
+            tool_calls: vec![ToolCallRequest {
+                id: "c1".into(),
+                name: "read_file".into(),
+                args_json: r#"{"path":"marker.txt"}"#.into(),
+            }],
+            input_tokens: 1,
+            output_tokens: 1,
+            cache_read: 0,
+            cache_write: 0,
+        })
+    }
+}
+
+#[tokio::test]
+async fn subagent_tool_loop_dispatches_and_reports_result() {
+    let _guard = TestEmitterGuard::install();
+    let dir = TempDir::new().unwrap();
+    std::fs::write(dir.path().join("marker.txt"), "MARKER_CONTENT_42").unwrap();
+    let roster = Arc::new(SubagentRoster::new());
+    let provider: Arc<dyn ProviderAdapter> = Arc::new(ToolThenReportProvider);
+    let registry = Arc::new(ToolRegistry::new(dir.path().to_path_buf(), vec![]));
+    let meter = test_meter();
+
+    spawn_reviewer(&roster, &provider, &registry, &meter, "alpha", "alpha").await;
+
+    let round1 = roster
+        .collect_outputs(CollectOutputsArgs { round: 1, timeout_ms: 0 }, &shared_token())
+        .await
+        .unwrap();
+    assert!(
+        round1.contains("MARKER_CONTENT_42"),
+        "subagent did not dispatch read_file and feed its result into the report: {round1}"
     );
 }

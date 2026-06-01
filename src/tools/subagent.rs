@@ -1,6 +1,6 @@
 use crate::events::{now_ms, GantryEvent};
 use crate::meter::TokenMeter;
-use crate::provider::{ChatMessage, ProviderAdapter};
+use crate::provider::{ChatMessage, ProviderAdapter, ToolResult};
 use crate::tools::ToolRegistry;
 use futures_util::FutureExt;
 use serde::{Deserialize, Serialize};
@@ -9,6 +9,10 @@ use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
 const SUBAGENT_MAX_TURNS: u32 = 5;
+
+/// Max model turns a subagent may take *within one round* to use tools before
+/// it must produce its report. Bounds tool-loop cost per round.
+const SUBAGENT_MAX_TOOL_TURNS: u32 = 8;
 
 /// Assemble a subagent's system prompt: the profile-supplied `base` plus the
 /// per-spawn `role` / `scope` / `extra_context` as neutral labeled sections.
@@ -87,7 +91,7 @@ impl SubagentRoster {
         &self,
         args: SpawnSubagentArgs,
         provider: Arc<dyn ProviderAdapter>,
-        _registry: Arc<ToolRegistry>,
+        registry: Arc<ToolRegistry>,
         system_template: String,
         meter: Arc<TokenMeter>,
     ) -> Result<String, String> {
@@ -113,95 +117,118 @@ impl SubagentRoster {
             args.extra_context.as_deref(),
         );
         let join = tokio::spawn(async move {
-            // The first user turn keeps the "Role: " prefix so the subagent's
-            // assignment is explicit in its history.
+            // First user turn carries the assignment; the "Role: " prefix stays so
+            // the subagent's scope is explicit (and tests can detect a subagent turn).
             let mut messages: Vec<ChatMessage> = vec![ChatMessage::User(format!(
                 "Role: {role}\nScope: {scope}\nTemplate: {template}",
                 role = args.role,
                 scope = args.scope,
                 template = args.template,
             ))];
-            let mut turn: u32 = 0;
+            let tools = registry.schemas();
+            let mut round: u32 = 0;
             let mut input_tokens: u64 = 0;
             let mut output_tokens: u64 = 0;
+            let mut stop = false;
 
-            loop {
+            'rounds: loop {
                 if cancel.is_cancelled() {
                     break;
                 }
 
-                // Catch panics so a single subagent cannot take down the run;
-                // surface them as `subagent_failed` (invariant #5).
-                let attempt = std::panic::AssertUnwindSafe(provider.complete(
-                    &subagent_system,
-                    &messages,
-                    &[],
-                ))
-                .catch_unwind()
-                .await;
-
-                let resp = match attempt {
-                    Ok(Ok(resp)) => resp,
-                    Ok(Err(err)) => {
-                        let _ = GantryEvent::SubagentFailed {
-                            ts: now_ms(),
-                            name: subagent_name.clone(),
-                            reason: err.to_string(),
+                // Bounded tool loop within the round: call the model, dispatch any
+                // tool calls, repeat until it returns a text-only report (or cap hit).
+                let mut report = String::new();
+                for _ in 0..SUBAGENT_MAX_TOOL_TURNS {
+                    // Catch panics so one subagent cannot take down the run (invariant #5).
+                    let attempt =
+                        std::panic::AssertUnwindSafe(provider.complete(&subagent_system, &messages, &tools))
+                            .catch_unwind()
+                            .await;
+                    let resp = match attempt {
+                        Ok(Ok(resp)) => resp,
+                        Ok(Err(err)) => {
+                            let _ = GantryEvent::SubagentFailed {
+                                ts: now_ms(),
+                                name: subagent_name.clone(),
+                                reason: err.to_string(),
+                            }
+                            .emit();
+                            break 'rounds;
                         }
-                        .emit();
+                        Err(_panic) => {
+                            let _ = GantryEvent::SubagentFailed {
+                                ts: now_ms(),
+                                name: subagent_name.clone(),
+                                reason: "subagent task panicked".into(),
+                            }
+                            .emit();
+                            break 'rounds;
+                        }
+                    };
+
+                    // Invariant #4: every response feeds the shared meter.
+                    input_tokens += resp.input_tokens;
+                    output_tokens += resp.output_tokens;
+                    if meter
+                        .add(resp.input_tokens, resp.output_tokens, resp.cache_read, resp.cache_write)
+                        .is_err()
+                    {
+                        stop = true;
+                    }
+
+                    if resp.tool_calls.is_empty() {
+                        report = resp.text.clone();
+                        if !resp.text.is_empty() {
+                            let _ = GantryEvent::AssistantText {
+                                ts: now_ms(),
+                                role: subagent_name.clone(),
+                                text: resp.text.clone(),
+                            }
+                            .emit();
+                        }
+                        messages.push(ChatMessage::Assistant {
+                            text: resp.text,
+                            tool_calls: vec![],
+                        });
                         break;
                     }
-                    Err(_panic) => {
-                        let _ = GantryEvent::SubagentFailed {
-                            ts: now_ms(),
-                            name: subagent_name.clone(),
-                            reason: "subagent task panicked".into(),
-                        }
-                        .emit();
+
+                    // Dispatch the requested tools and feed results back.
+                    let mut tool_results = Vec::with_capacity(resp.tool_calls.len());
+                    for call in &resp.tool_calls {
+                        let out = registry
+                            .dispatch(&subagent_name, round, &call.name, &call.args_json)
+                            .await;
+                        tool_results.push(ToolResult {
+                            id: call.id.clone(),
+                            content: out.content,
+                            is_error: false,
+                        });
+                    }
+                    messages.push(ChatMessage::Assistant {
+                        text: resp.text,
+                        tool_calls: resp.tool_calls,
+                    });
+                    messages.push(ChatMessage::ToolResults(tool_results));
+
+                    if stop || cancel.is_cancelled() {
                         break;
                     }
-                };
-
-                // Invariant #4: every provider response feeds the shared meter,
-                // so subagent tokens count against the run budget.
-                input_tokens += resp.input_tokens;
-                output_tokens += resp.output_tokens;
-                let tripped = meter
-                    .add(
-                        resp.input_tokens,
-                        resp.output_tokens,
-                        resp.cache_read,
-                        resp.cache_write,
-                    )
-                    .is_err();
-
-                // Always emit one round result so `collect_outputs` can join on
-                // exactly one message per subagent per round (the barrier);
-                // surface assistant_text only for non-empty turns.
-                let _ = find_tx.send(resp.text.clone());
-                if !resp.text.is_empty() {
-                    let _ = GantryEvent::AssistantText {
-                        ts: now_ms(),
-                        role: subagent_name.clone(),
-                        text: resp.text.clone(),
-                    }
-                    .emit();
                 }
-                messages.push(ChatMessage::Assistant {
-                    text: resp.text,
-                    tool_calls: vec![],
-                });
 
-                if tripped || cancel.is_cancelled() {
+                // Barrier: exactly one report per round (possibly empty if tripped).
+                let _ = find_tx.send(report);
+
+                if stop || meter.tripped() || cancel.is_cancelled() {
                     break;
                 }
-
-                turn += 1;
+                round += 1;
                 match msg_rx.recv().await {
                     Some(next) => messages.push(ChatMessage::User(next)),
                     None => break,
                 }
-                if turn >= SUBAGENT_MAX_TURNS {
+                if round >= SUBAGENT_MAX_TURNS {
                     break;
                 }
             }
@@ -209,7 +236,7 @@ impl SubagentRoster {
             let _ = GantryEvent::SubagentDone {
                 ts: now_ms(),
                 name: subagent_name,
-                turns: turn,
+                turns: round,
                 input_tokens,
                 output_tokens,
             }
