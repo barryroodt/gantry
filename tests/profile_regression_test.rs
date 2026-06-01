@@ -64,3 +64,22 @@ fn review_profile_subagent_carries_reviewer_format() {
         "subagent lost the verdict structure"
     );
 }
+
+#[test]
+fn review_profile_carries_compose_and_unify_prompts() {
+    let p = load_profile(&review_profile_dir()).expect("load");
+    let compose = p
+        .compose_prompt
+        .expect("review profile has a compose prompt");
+    assert!(
+        compose.contains("plan"),
+        "compose lost the plan instruction"
+    );
+    assert!(
+        compose.contains("correctness"),
+        "compose lost the team composition rules"
+    );
+    let unify = p.unify_prompt.expect("review profile has a unify prompt");
+    assert!(unify.contains("verdict"), "unify lost the verdict field");
+    assert!(unify.contains("findings"), "unify lost the findings field");
+}

@@ -11,6 +11,8 @@ struct ProfileManifest {
     mode: Option<Mode>,
     system: Option<PathBuf>,
     subagent_system: Option<PathBuf>,
+    compose: Option<PathBuf>,
+    unify: Option<PathBuf>,
     #[serde(default)]
     tools: Vec<String>,
     #[serde(default)]
@@ -24,6 +26,8 @@ pub struct LoadedProfile {
     pub mode: Option<Mode>,
     pub system_prompt: Option<String>,
     pub subagent_system_prompt: Option<String>,
+    pub compose_prompt: Option<String>,
+    pub unify_prompt: Option<String>,
     pub tools: Vec<String>,
     pub inject_skills: Vec<String>,
 }
@@ -53,6 +57,8 @@ pub fn load_profile(dir: &Path) -> Result<LoadedProfile, ProfileError> {
         mode: manifest.mode,
         system_prompt: read_profile_file(dir, manifest.system.as_deref())?,
         subagent_system_prompt: read_profile_file(dir, manifest.subagent_system.as_deref())?,
+        compose_prompt: read_profile_file(dir, manifest.compose.as_deref())?,
+        unify_prompt: read_profile_file(dir, manifest.unify.as_deref())?,
         tools: manifest.tools,
         inject_skills: manifest.inject_skills,
     })

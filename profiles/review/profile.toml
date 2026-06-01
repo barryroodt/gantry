@@ -4,6 +4,8 @@
 mode = "team"
 system = "system.md"
 subagent_system = "subagent.md"
+compose = "compose.md"
+unify = "unify.md"
 tools = [
     "read_file",
     "list_files",
