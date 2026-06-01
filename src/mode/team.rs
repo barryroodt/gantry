@@ -174,13 +174,24 @@ impl TeamMode {
             description: "Return the final structured result as this tool's arguments.".into(),
             json_schema: schema.clone(),
         };
+        // Belt-and-suspenders structured output: offer the `respond` tool AND
+        // instruct the model in-prompt to emit one ```json fence conforming to
+        // the schema, so providers that don't honor the forced tool still yield
+        // a parseable result for the fence fallback below.
+        let schema_pretty =
+            serde_json::to_string_pretty(schema).unwrap_or_else(|_| schema.to_string());
+        let directive = format!(
+            "{system}\n\n# Output format\nReturn ONLY a single ```json fenced code block \
+             — no prose before or after — whose contents are a JSON object conforming to \
+             this schema:\n```json\n{schema_pretty}\n```"
+        );
         let mut last_text = String::new();
         for _ in 0..2 {
             if self.cancel.is_cancelled() {
                 return Err(self.cancel_exit());
             }
             let resp = tokio::select! {
-                r = self.provider.complete(system, messages, std::slice::from_ref(&respond)) => r,
+                r = self.provider.complete(&directive, messages, std::slice::from_ref(&respond)) => r,
                 _ = self.cancel.cancelled() => return Err(self.cancel_exit()),
             };
             let resp = match resp {
