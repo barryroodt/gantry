@@ -37,7 +37,7 @@ pub struct Cli {
     #[arg(long = "system-file", value_name = "PATH")]
     pub system_file: Option<PathBuf>,
 
-    /// System prompt body for spawned subagents (team reviewer base persona),
+    /// System prompt body for spawned subagents (team subagent base persona),
     /// read from this file. If omitted, a minimal neutral default is used.
     #[arg(long = "subagent-system-file", value_name = "PATH")]
     pub subagent_system_file: Option<PathBuf>,

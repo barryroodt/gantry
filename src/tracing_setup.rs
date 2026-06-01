@@ -22,7 +22,7 @@ pub fn init_tracing() {
 /// a stderr backtrace) for any panic, but does **not** exit the process.
 ///
 /// Exiting here would kill the whole run on a *contained* panic — e.g. a single
-/// reviewer subagent caught by `catch_unwind` for N-1 degradation. Instead the
+/// subagent caught by `catch_unwind` for N-1 degradation. Instead the
 /// root (`main`) catches its own panic via `catch_unwind` and emits the single
 /// terminal `result` event, preserving the "exactly one result" invariant.
 pub fn install_panic_hook() {

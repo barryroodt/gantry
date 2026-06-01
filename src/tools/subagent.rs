@@ -9,57 +9,28 @@ use tokio::sync::Mutex;
 
 const SUBAGENT_MAX_TURNS: u32 = 5;
 
-/// Assemble a reviewer subagent's system prompt per ADR-0003 §3: security
-/// constraints, role focus, output-format contract, scoped-diff instruction,
-/// optional extra context, and CI context (plus the conventions override).
+/// Assemble a subagent's system prompt: the profile-supplied `base` plus the
+/// per-spawn `role` / `scope` / `extra_context` as neutral labeled sections.
+/// All task-specific framing (output format, constraints, etc.) lives in the
+/// `base`, which the orchestrator supplies via the profile (ADR-0004).
 fn build_subagent_system_prompt(
     base: &str,
     role: &str,
     scope: &str,
     extra_context: Option<&str>,
 ) -> String {
-    let scope_clause = if scope == "full" || scope.is_empty() {
-        "git diff {{DIFF_RANGE}}".to_string()
-    } else {
-        format!("git diff {{{{DIFF_RANGE}}}} -- {scope}")
-    };
-
-    let mut prompt = String::new();
-    prompt.push_str(base);
-    prompt.push_str(
-        "\n\n# Security Constraints\n\
-Read-only. git/cat/ls/find only. No tests, builds, linters, gh, or package installs.\n\n",
-    );
-    prompt.push_str(&format!(
-        "# {role} Reviewer\n\
-You are reviewing code changes in the \"{role}\" lane. Stay in your lane: style \u{2192} \
-conventions reviewer; spec gaps \u{2192} spec-compliance; cross-service contracts \u{2192} \
-contracts reviewer. Record cross-lane observations under \"Notes for Other Reviewers\" \
-only \u{2014} you cannot message peers directly.\n\n"
-    ));
-    prompt.push_str(&format!("## Scoped diff\nRun: {scope_clause}\n\n"));
-    if let Some(extra) = extra_context.filter(|s| !s.is_empty()) {
-        prompt.push_str(extra);
-        prompt.push_str("\n\n");
+    let mut prompt = String::from(base);
+    if !role.is_empty() {
+        prompt.push_str("\n\n## Role\n");
+        prompt.push_str(role);
     }
-    prompt.push_str(
-        "# Reviewer Output Format\n\
-Final turn = markdown only, no JSON fence:\n\
-## [Reviewer Name] \u{2014} [Focus Area]\n\
-### Verdict: Ready to merge / With fixes / Not ready\n\
-### Issues\n#### Critical / Important / Minor\n\
-- `file:line` \u{2014} Description. **Why it matters:** ...\n\
-### Strengths\n### Notes for Other Reviewers\n\n",
-    );
-    prompt.push_str(
-        "# CI context\n\
-You are a teammate in an automated Gantry review. A cross-review digest will be \
-broadcast later; amend or withdraw findings in your follow-up report.",
-    );
-    if role.contains("conventions") {
-        prompt.push_str(
-            "\n\nOVERRIDE: static analysis against AGENTS.md only \u{2014} do NOT execute CI commands.",
-        );
+    if !scope.is_empty() {
+        prompt.push_str("\n\n## Scope\n");
+        prompt.push_str(scope);
+    }
+    if let Some(extra) = extra_context.filter(|s| !s.is_empty()) {
+        prompt.push_str("\n\n");
+        prompt.push_str(extra);
     }
     prompt
 }
@@ -85,8 +56,8 @@ pub struct BroadcastSummaryArgs {
     pub summary: String,
 }
 
-/// Reviewer state held by the coordinator. spawn_subagent adds to roster;
-/// collect_outputs drains assistant_text per reviewer; broadcast_summary feeds
+/// Subagent state held by the coordinator. spawn_subagent adds to roster;
+/// collect_outputs drains assistant_text per subagent; broadcast_summary feeds
 /// summary back to all subagents as a user-turn for round 2.
 pub struct SubagentRoster {
     pub subagents: Mutex<Vec<SubagentHandle>>,
@@ -136,10 +107,10 @@ impl SubagentRoster {
             args.extra_context.as_deref(),
         );
         tokio::spawn(async move {
-            // The first user turn keeps the "Role: " prefix so the coordinator's
-            // scope assignment is explicit in the reviewer's history.
+            // The first user turn keeps the "Role: " prefix so the subagent's
+            // assignment is explicit in its history.
             let mut messages: Vec<ChatMessage> = vec![ChatMessage::User(format!(
-                "Role: {role}\nDiff scope: {scope}\nReview using template: {template}",
+                "Role: {role}\nScope: {scope}\nTemplate: {template}",
                 role = args.role,
                 scope = args.scope,
                 template = args.template,
@@ -153,7 +124,7 @@ impl SubagentRoster {
                     break;
                 }
 
-                // Catch panics so a single reviewer cannot take down the run;
+                // Catch panics so a single subagent cannot take down the run;
                 // surface them as `subagent_failed` (invariant #5).
                 let attempt = std::panic::AssertUnwindSafe(provider.complete(
                     &subagent_system,
@@ -186,7 +157,7 @@ impl SubagentRoster {
                 };
 
                 // Invariant #4: every provider response feeds the shared meter,
-                // so reviewer tokens count against the run budget.
+                // so subagent tokens count against the run budget.
                 input_tokens += resp.input_tokens;
                 output_tokens += resp.output_tokens;
                 let tripped = meter
