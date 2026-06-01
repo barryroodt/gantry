@@ -6,3 +6,5 @@
 
 # Environment overrides
 .env
+.env.*
+.envrc

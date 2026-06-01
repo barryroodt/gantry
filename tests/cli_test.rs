@@ -47,12 +47,6 @@ fn parse_slug_routes_each_provider() {
             Provider::Gemini,
             "gemini-2.0-flash",
         ),
-        ("cursor/composer-2.5", Provider::Cursor, "composer-2.5"),
-        (
-            "cursor/cursor-composer-2.5-fast",
-            Provider::Cursor,
-            "cursor-composer-2.5-fast",
-        ),
     ];
 
     for (slug, provider, model) in cases {
@@ -88,6 +82,13 @@ fn parse_slug_unknown_provider_rejected() {
         parse_model_slug("llama/llama-3"),
         Err(ConfigError::UnknownProvider {
             provider: "llama".into(),
+        })
+    );
+    // Cursor was removed (ADR-0006): the slug no longer routes to a provider.
+    assert_eq!(
+        parse_model_slug("cursor/composer-2.5"),
+        Err(ConfigError::UnknownProvider {
+            provider: "cursor".into(),
         })
     );
 }

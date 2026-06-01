@@ -11,7 +11,7 @@ pub struct Cli {
 
     /// Model identifier in `provider/model` slug form, e.g.
     /// `anthropic/claude-opus-4-8` or `openai/gpt-4o`. The provider segment
-    /// (anthropic|openai|gemini|cursor) selects the adapter; everything after
+    /// (anthropic|openai|gemini) selects the adapter; everything after
     /// the first `/` is the bare model id forwarded to that provider's API.
     #[arg(long, value_name = "PROVIDER/MODEL")]
     pub model: String,
@@ -78,7 +78,6 @@ pub enum Provider {
     Anthropic,
     OpenAi,
     Gemini,
-    Cursor,
 }
 
 impl Provider {
@@ -87,7 +86,6 @@ impl Provider {
             Self::Anthropic => "anthropic",
             Self::OpenAi => "openai",
             Self::Gemini => "gemini",
-            Self::Cursor => "cursor",
         }
     }
 
@@ -97,7 +95,6 @@ impl Provider {
             "anthropic" => Some(Self::Anthropic),
             "openai" => Some(Self::OpenAi),
             "gemini" => Some(Self::Gemini),
-            "cursor" => Some(Self::Cursor),
             _ => None,
         }
     }
@@ -110,9 +107,7 @@ pub enum ConfigError {
     )]
     MissingProviderPrefix { model: String },
 
-    #[error(
-        "unknown provider '{provider}' in model slug (expected anthropic|openai|gemini|cursor)"
-    )]
+    #[error("unknown provider '{provider}' in model slug (expected anthropic|openai|gemini)")]
     UnknownProvider { provider: String },
 
     #[error("model id is empty after provider in slug: {slug}")]

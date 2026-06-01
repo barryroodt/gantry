@@ -5,7 +5,6 @@ pub const PRICE_TABLE: &[(&str, f64, f64)] = &[
     ("claude-opus", 15.00, 75.00),
     ("gpt-4o-mini", 0.15, 0.60),
     ("gpt-4o", 2.50, 10.00),
-    ("composer-2.5", 0.50, 2.00),
     ("gemini-1.5", 0.075, 0.30),
 ];
 

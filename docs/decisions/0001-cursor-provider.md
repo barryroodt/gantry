@@ -1,6 +1,6 @@
 # ADR-0001: Cursor Composer 2.5 provider path
 
-**Status:** Accepted  
+**Status:** Superseded by [ADR-0006](./0006-cursor-provider-removal.md) (2026-05-31 — the Cursor provider was removed; see ADR-0006 for findings and the reinstatement path)
 **Date:** 2026-05-28  
 **Deciders:** rig-harness phase-0 (task 0.1)
 

@@ -1,15 +1,13 @@
 //! Provider retry policy (spec §"Error handling").
 //!
-//! - **429 (rate limited):** retry once, honoring `Retry-After` when the value
-//!   is available (only the Cursor adapter, which owns its HTTP layer, can
-//!   surface it — it embeds `retry-after=<secs>` in the error message).
+//! - **429 (rate limited):** retry once, honoring `Retry-After` when an adapter
+//!   surfaces it as an embedded `retry-after=<secs>` hint in the error message.
 //! - **5xx / network / timeout (transient):** exponential backoff 3× (1s/4s/16s).
 //! - **4xx and everything else (fatal):** return immediately.
 //!
 //! The rig-based adapters (Anthropic/OpenAI/Gemini) do not expose raw HTTP
 //! status codes, so classification falls back to matching the error text. This
-//! is best-effort by necessity; the Cursor adapter (default eval provider) owns
-//! its reqwest layer and classifies precisely.
+//! is best-effort by necessity.
 
 use std::future::Future;
 use std::pin::Pin;
@@ -172,7 +170,7 @@ mod tests {
             ErrorClass::RateLimited { retry_after: None }
         );
         assert_eq!(
-            classify_error(&anyhow::anyhow!("cursor bridge returned 503: down")),
+            classify_error(&anyhow::anyhow!("service returned 503: down")),
             ErrorClass::Transient
         );
         assert_eq!(

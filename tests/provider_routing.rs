@@ -3,18 +3,6 @@ use gantry::provider::build_adapter;
 use std::sync::{LazyLock, Mutex, MutexGuard};
 
 #[test]
-fn build_adapter_cursor_requires_api_key() {
-    let _env = EnvVarGuard::set("CURSOR_API_KEY", None);
-    let result = build_adapter(Provider::Cursor, "composer-2.5".into());
-    assert!(result.is_err());
-    assert!(result
-        .err()
-        .expect("error")
-        .to_string()
-        .contains("CURSOR_API_KEY not set"));
-}
-
-#[test]
 fn build_adapter_anthropic_requires_api_key() {
     let _env = EnvVarGuard::set("ANTHROPIC_API_KEY", None);
     let result = build_adapter(Provider::Anthropic, "claude-sonnet-4".into());
@@ -98,8 +86,6 @@ fn parse_slug_routes_provider_table() {
         ("openai/o3-mini", Provider::OpenAi),
         ("gemini/gemini-2.0-flash", Provider::Gemini),
         ("gemini/gemini-1.5-pro", Provider::Gemini),
-        ("cursor/cursor-composer-2.5", Provider::Cursor),
-        ("cursor/composer-2.5", Provider::Cursor),
     ];
 
     for (slug, expected) in cases {

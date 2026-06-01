@@ -4,14 +4,12 @@ use serde::{Deserialize, Serialize};
 use crate::cli::Provider;
 
 pub mod anthropic;
-pub mod cursor;
 pub mod gemini;
 pub mod openai;
 pub mod retry;
 mod rig_convert;
 
 pub use anthropic::AnthropicProvider;
-pub use cursor::CursorProvider;
 pub use gemini::GeminiProvider;
 pub use openai::OpenAiProvider;
 
@@ -113,7 +111,6 @@ pub fn build_adapter(
         Provider::Anthropic => Ok(Box::new(anthropic::AnthropicProvider::new(model)?)),
         Provider::OpenAi => Ok(Box::new(openai::OpenAiProvider::new(model)?)),
         Provider::Gemini => Ok(Box::new(GeminiProvider::new(model)?)),
-        Provider::Cursor => Ok(Box::new(cursor::CursorProvider::new(model)?)),
     }
 }
 
