@@ -1,4 +1,5 @@
 use clap::{Parser, ValueEnum};
+use serde::Deserialize;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
@@ -6,7 +7,7 @@ use thiserror::Error;
 #[command(name = "gantry", about = "Gantry harness sidecar")]
 pub struct Cli {
     #[arg(long)]
-    pub mode: Mode,
+    pub mode: Option<Mode>,
 
     /// Model identifier in `provider/model` slug form, e.g.
     /// `anthropic/claude-opus-4-8` or `openai/gpt-4o`. The provider segment
@@ -46,10 +47,17 @@ pub struct Cli {
     /// available for the selected mode. Each name must be valid for the mode.
     #[arg(long = "tool", value_name = "NAME")]
     pub tools: Vec<String>,
+
+    /// Load a profile directory (`profile.toml` + prompt files): sets mode,
+    /// system/subagent prompts, tool allowlist, and inject-skills. Explicit
+    /// flags override profile values.
+    #[arg(long = "profile", value_name = "DIR")]
+    pub profile: Option<PathBuf>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, ValueEnum)]
+#[derive(Clone, Debug, Eq, PartialEq, ValueEnum, Deserialize)]
 #[clap(rename_all = "lowercase")]
+#[serde(rename_all = "lowercase")]
 pub enum Mode {
     Single,
     Team,
@@ -131,6 +139,11 @@ pub enum ConfigError {
     SystemFileNotReadable(PathBuf),
     #[error("unknown tool '{name}' (available for mode: {available})")]
     UnknownTool { name: String, available: String },
+    #[error("mode is required: pass --mode or set `mode` in the profile")]
+    ModeRequired,
+
+    #[error(transparent)]
+    Profile(#[from] crate::profile::ProfileError),
 }
 
 impl From<clap::Error> for ConfigError {
@@ -184,11 +197,39 @@ impl Cli {
             return Err(ConfigError::PromptFileMissing(self.prompt_file.clone()));
         }
         let (provider, model) = parse_model_slug(&self.model)?;
-        let system_prompt = read_optional_system_file(self.system_file.as_deref())?;
+
+        let profile = match self.profile.as_deref() {
+            Some(dir) => Some(crate::profile::load_profile(dir)?),
+            None => None,
+        };
+
+        let mode = self
+            .mode
+            .or_else(|| profile.as_ref().and_then(|p| p.mode.clone()))
+            .ok_or(ConfigError::ModeRequired)?;
+
+        let system_prompt = match read_optional_system_file(self.system_file.as_deref())? {
+            Some(s) => Some(s),
+            None => profile.as_ref().and_then(|p| p.system_prompt.clone()),
+        };
         let subagent_system_prompt =
-            read_optional_system_file(self.subagent_system_file.as_deref())?;
-        let available = crate::tools::registry::available_tool_names(self.mode == Mode::Team);
-        for tool in &self.tools {
+            match read_optional_system_file(self.subagent_system_file.as_deref())? {
+                Some(s) => Some(s),
+                None => profile
+                    .as_ref()
+                    .and_then(|p| p.subagent_system_prompt.clone()),
+            };
+
+        let tools = if self.tools.is_empty() {
+            profile
+                .as_ref()
+                .map(|p| p.tools.clone())
+                .unwrap_or_default()
+        } else {
+            self.tools
+        };
+        let available = crate::tools::registry::available_tool_names(mode == Mode::Team);
+        for tool in &tools {
             if !available.contains(&tool.as_str()) {
                 return Err(ConfigError::UnknownTool {
                     name: tool.clone(),
@@ -196,18 +237,28 @@ impl Cli {
                 });
             }
         }
+
+        let inject_skills = if self.inject_skills.is_empty() {
+            profile
+                .as_ref()
+                .map(|p| p.inject_skills.clone())
+                .unwrap_or_default()
+        } else {
+            self.inject_skills
+        };
+
         Ok(Validated {
-            mode: self.mode,
+            mode,
             model,
             provider,
             workdir,
             prompt_file: self.prompt_file,
             max_tokens: self.max_tokens,
             timeout_ms: self.timeout_ms,
-            inject_skills: self.inject_skills,
+            inject_skills,
             system_prompt,
             subagent_system_prompt,
-            tools: self.tools,
+            tools,
         })
     }
 

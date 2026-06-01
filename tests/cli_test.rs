@@ -18,7 +18,7 @@ fn write_prompt_file(dir: &Path, name: &str, contents: &str) -> PathBuf {
 
 fn base_cli(workdir: &Path, prompt_file: &Path) -> Cli {
     Cli {
-        mode: Mode::Single,
+        mode: Some(Mode::Single),
         model: "anthropic/claude-sonnet-4".into(),
         workdir: workdir.to_path_buf(),
         prompt_file: prompt_file.to_path_buf(),
@@ -28,6 +28,7 @@ fn base_cli(workdir: &Path, prompt_file: &Path) -> Cli {
         system_file: None,
         subagent_system_file: None,
         tools: vec![],
+        profile: None,
     }
 }
 
@@ -292,7 +293,7 @@ fn parses_all_six_flags_from_argv() {
     ])
     .expect("parse argv");
 
-    assert_eq!(cli.mode, Mode::Team);
+    assert_eq!(cli.mode, Some(Mode::Team));
     assert_eq!(cli.model, "openai/gpt-4o");
     assert_eq!(cli.workdir, workdir);
     assert_eq!(cli.prompt_file, prompt);
@@ -527,4 +528,141 @@ fn tools_default_empty_when_flag_absent() {
     .expect("parse_and_validate");
 
     assert!(validated.tools.is_empty());
+}
+
+fn write_profile(dir: &Path, toml: &str, files: &[(&str, &str)]) {
+    std::fs::create_dir_all(dir).unwrap();
+    std::fs::write(dir.join("profile.toml"), toml).unwrap();
+    for (name, body) in files {
+        std::fs::write(dir.join(name), body).unwrap();
+    }
+}
+
+#[test]
+fn parses_profile_into_validated() {
+    let workdir = temp_workdir("profile-load");
+    let prompt = write_prompt_file(&workdir, "prompt.txt", "hello");
+    let profile_dir = workdir.join("prof");
+    write_profile(
+        &profile_dir,
+        "mode = \"team\"\nsystem = \"system.md\"\nsubagent_system = \"subagent.md\"\ntools = [\"read_file\", \"spawn_subagent\"]\ninject_skills = [\"code-review\"]\n",
+        &[("system.md", "PROFILE SYSTEM"), ("subagent.md", "PROFILE SUBAGENT")],
+    );
+
+    let validated = Cli::parse_and_validate_from([
+        "gantry",
+        "--model",
+        "openai/gpt-4o",
+        "--workdir",
+        workdir.to_str().unwrap(),
+        "--prompt-file",
+        prompt.to_str().unwrap(),
+        "--max-tokens",
+        "8192",
+        "--timeout-ms",
+        "60000",
+        "--profile",
+        profile_dir.to_str().unwrap(),
+    ])
+    .expect("parse_and_validate");
+
+    assert_eq!(validated.mode, Mode::Team);
+    assert_eq!(validated.system_prompt.as_deref(), Some("PROFILE SYSTEM"));
+    assert_eq!(
+        validated.subagent_system_prompt.as_deref(),
+        Some("PROFILE SUBAGENT")
+    );
+    assert_eq!(validated.tools, ["read_file", "spawn_subagent"]);
+    assert_eq!(validated.inject_skills, ["code-review"]);
+}
+
+#[test]
+fn explicit_flags_override_profile() {
+    let workdir = temp_workdir("profile-override");
+    let prompt = write_prompt_file(&workdir, "prompt.txt", "hello");
+    let sys = write_prompt_file(&workdir, "override-system.md", "OVERRIDE SYSTEM");
+    let profile_dir = workdir.join("prof");
+    write_profile(
+        &profile_dir,
+        "mode = \"team\"\nsystem = \"system.md\"\ntools = [\"read_file\", \"spawn_subagent\"]\ninject_skills = [\"code-review\"]\n",
+        &[("system.md", "PROFILE SYSTEM")],
+    );
+
+    let validated = Cli::parse_and_validate_from([
+        "gantry",
+        "--mode",
+        "single",
+        "--model",
+        "openai/gpt-4o",
+        "--workdir",
+        workdir.to_str().unwrap(),
+        "--prompt-file",
+        prompt.to_str().unwrap(),
+        "--max-tokens",
+        "8192",
+        "--timeout-ms",
+        "60000",
+        "--profile",
+        profile_dir.to_str().unwrap(),
+        "--system-file",
+        sys.to_str().unwrap(),
+        "--tool",
+        "git_diff",
+        "--inject-skill",
+        "other-skill",
+    ])
+    .expect("parse_and_validate");
+
+    assert_eq!(validated.mode, Mode::Single);
+    assert_eq!(validated.system_prompt.as_deref(), Some("OVERRIDE SYSTEM"));
+    assert_eq!(validated.tools, ["git_diff"]);
+    assert_eq!(validated.inject_skills, ["other-skill"]);
+}
+
+#[test]
+fn mode_required_when_absent_and_no_profile() {
+    let workdir = temp_workdir("mode-required");
+    let prompt = write_prompt_file(&workdir, "prompt.txt", "hello");
+    let err = Cli::parse_and_validate_from([
+        "gantry",
+        "--model",
+        "openai/gpt-4o",
+        "--workdir",
+        workdir.to_str().unwrap(),
+        "--prompt-file",
+        prompt.to_str().unwrap(),
+        "--max-tokens",
+        "8192",
+        "--timeout-ms",
+        "60000",
+    ])
+    .unwrap_err();
+    assert_eq!(err, ConfigError::ModeRequired);
+}
+
+#[test]
+fn missing_profile_manifest_returns_error() {
+    let workdir = temp_workdir("profile-missing");
+    let prompt = write_prompt_file(&workdir, "prompt.txt", "hello");
+    let empty = workdir.join("empty-prof");
+    std::fs::create_dir_all(&empty).unwrap();
+    let err = Cli::parse_and_validate_from([
+        "gantry",
+        "--mode",
+        "single",
+        "--model",
+        "openai/gpt-4o",
+        "--workdir",
+        workdir.to_str().unwrap(),
+        "--prompt-file",
+        prompt.to_str().unwrap(),
+        "--max-tokens",
+        "8192",
+        "--timeout-ms",
+        "60000",
+        "--profile",
+        empty.to_str().unwrap(),
+    ])
+    .unwrap_err();
+    assert!(matches!(err, ConfigError::Profile(_)), "got {err:?}");
 }
