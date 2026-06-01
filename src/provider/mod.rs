@@ -50,6 +50,40 @@ pub trait ProviderAdapter: Send + Sync {
         messages: &[ChatMessage],
         tools: &[ToolSchema],
     ) -> anyhow::Result<ProviderResponse>;
+
+    /// Whether this provider can return schema-validated structured output via
+    /// [`Self::complete_structured`]. Default: true (uses the tool mechanism).
+    fn supports_structured_output(&self) -> bool {
+        true
+    }
+
+    /// Force a single structured result: expose one `respond` tool carrying
+    /// `schema` and return its parsed arguments. `Err` if the model did not call
+    /// it (the caller may retry or fall back to fence parsing).
+    async fn complete_structured(
+        &self,
+        system: &str,
+        messages: &[ChatMessage],
+        schema: &serde_json::Value,
+    ) -> anyhow::Result<serde_json::Value> {
+        let respond = ToolSchema {
+            name: "respond".into(),
+            description: "Return the final structured result as this tool's arguments.".into(),
+            json_schema: schema.clone(),
+        };
+        let resp = self
+            .complete(system, messages, std::slice::from_ref(&respond))
+            .await?;
+        let call = resp
+            .tool_calls
+            .iter()
+            .find(|c| c.name == "respond")
+            .ok_or_else(|| {
+                anyhow::anyhow!("model did not return structured output via the respond tool")
+            })?;
+        serde_json::from_str(&call.args_json)
+            .map_err(|e| anyhow::anyhow!("structured output was not valid JSON: {e}"))
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -80,5 +114,66 @@ pub fn build_adapter(
         Provider::OpenAi => Ok(Box::new(openai::OpenAiProvider::new(model)?)),
         Provider::Gemini => Ok(Box::new(GeminiProvider::new(model)?)),
         Provider::Cursor => Ok(Box::new(cursor::CursorProvider::new(model)?)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct StubStructured {
+        tool_calls: Vec<ToolCallRequest>,
+    }
+
+    #[async_trait]
+    impl ProviderAdapter for StubStructured {
+        fn provider(&self) -> Provider {
+            Provider::OpenAi
+        }
+        fn model(&self) -> &str {
+            "stub"
+        }
+        async fn complete(
+            &self,
+            _system: &str,
+            _messages: &[ChatMessage],
+            _tools: &[ToolSchema],
+        ) -> anyhow::Result<ProviderResponse> {
+            Ok(ProviderResponse {
+                text: String::new(),
+                tool_calls: self.tool_calls.clone(),
+                input_tokens: 0,
+                output_tokens: 0,
+                cache_read: 0,
+                cache_write: 0,
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn complete_structured_parses_respond_tool_args() {
+        let p = StubStructured {
+            tool_calls: vec![ToolCallRequest {
+                id: "1".into(),
+                name: "respond".into(),
+                args_json: r#"{"verdict":"ready","count":2}"#.into(),
+            }],
+        };
+        let v = p
+            .complete_structured("sys", &[], &serde_json::json!({"type":"object"}))
+            .await
+            .unwrap();
+        assert_eq!(v["verdict"], "ready");
+        assert_eq!(v["count"], 2);
+    }
+
+    #[tokio::test]
+    async fn complete_structured_errs_when_tool_not_called() {
+        let p = StubStructured { tool_calls: vec![] };
+        let err = p
+            .complete_structured("sys", &[], &serde_json::json!({"type":"object"}))
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("did not return structured output"));
     }
 }
