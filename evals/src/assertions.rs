@@ -51,6 +51,10 @@ pub fn run_all(events: &[GantryEvent], expected: &Expected) -> Vec<AssertionFail
         failures.push(failure);
     }
 
+    if let Err(failure) = assert_subagent_lifecycle(events) {
+        failures.push(failure);
+    }
+
     failures
 }
 
@@ -364,6 +368,51 @@ pub fn assert_tool_call_pairing(events: &[GantryEvent]) -> Result<(), AssertionF
         ));
     }
 
+    Ok(())
+}
+
+/// ADR-0005: in team mode every spawned subagent must terminate — one
+/// `subagent_done` per `subagent_spawn` — and all before the coordinator's unify
+/// fence. Vacuously satisfied for single-mode fixtures (no subagents).
+pub fn assert_subagent_lifecycle(events: &[GantryEvent]) -> Result<(), AssertionFailure> {
+    let spawned = events
+        .iter()
+        .filter(|e| matches!(e, GantryEvent::SubagentSpawn { .. }))
+        .count();
+    if spawned == 0 {
+        return Ok(());
+    }
+    let done_idxs: Vec<usize> = events
+        .iter()
+        .enumerate()
+        .filter_map(|(i, e)| matches!(e, GantryEvent::SubagentDone { .. }).then_some(i))
+        .collect();
+    if done_idxs.len() != spawned {
+        return Err(AssertionFailure::new(
+            "assert_subagent_lifecycle",
+            format!(
+                "expected one subagent_done per spawned subagent (spawned {spawned}, done {})",
+                done_idxs.len()
+            ),
+        ));
+    }
+    // The unify fence is the last assistant_text carrying a ```json fence; every
+    // subagent must have finished before it.
+    if let Some(fence_idx) = events.iter().enumerate().rev().find_map(|(i, e)| match e {
+        GantryEvent::AssistantText { text, .. } if !extract_json_fence_bodies(text).is_empty() => {
+            Some(i)
+        }
+        _ => None,
+    }) {
+        if let Some(&late) = done_idxs.iter().find(|&&i| i > fence_idx) {
+            return Err(AssertionFailure::new(
+                "assert_subagent_lifecycle",
+                format!(
+                    "subagent_done at event {late} emitted after the unify fence at {fence_idx}"
+                ),
+            ));
+        }
+    }
     Ok(())
 }
 

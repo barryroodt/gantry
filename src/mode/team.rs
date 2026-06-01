@@ -79,53 +79,14 @@ impl TeamMode {
             self.spawned_subagents += 1;
         }
 
-        // 3. Barrier rounds (LoopDriver, cap MAX_ROUNDS): collect, then digest +
-        //    broadcast between rounds.
-        let driver = LoopDriver::new(MAX_ROUNDS);
-        let mut reports = String::new();
-        for round in 1..=driver.max_iterations {
-            if self.cancel.is_cancelled() {
-                return self.cancel_exit();
-            }
-            reports = match self
-                .roster
-                .collect_outputs(
-                    CollectOutputsArgs {
-                        round,
-                        timeout_ms: 0,
-                    },
-                    &self.cancel,
-                )
-                .await
-            {
-                Ok(r) => r,
-                Err(e) => return self.collapse(&e),
-            };
-            if round == 1 && self.team_collapsed(&reports) {
-                return self.collapse("all subagents crashed or produced no output");
-            }
-            if !driver.is_final_round(round) {
-                let _ = self
-                    .roster
-                    .broadcast_summary(BroadcastSummaryArgs {
-                        round,
-                        summary: digest_of(&reports),
-                    })
-                    .await;
-            }
-        }
+        // 3-4. Drive the barrier rounds + unify, then ALWAYS shut the subagents
+        //      down and join them: this makes every `subagent_done` fire before
+        //      the coordinator's fence and ensures no detached task outlives the
+        //      run (ADR-0005 validation).
+        let result = self.rounds_and_unify(&system_prefix).await;
+        self.roster.shutdown_and_join().await;
 
-        // 4. Unify into findings (structured, metered); emit the JSON fence.
-        let unify_system =
-            self.phase_system(&system_prefix, self.validated.unify_prompt.as_deref());
-        let unify_msgs = vec![ChatMessage::User(format!(
-            "{}\n\n# Reviewer reports\n{reports}",
-            self.prompt
-        ))];
-        let findings = match self
-            .structured_call(&unify_system, &unify_msgs, &findings_schema())
-            .await
-        {
+        let findings = match result {
             Ok(v) => v,
             Err(exit) => return exit,
         };
@@ -139,8 +100,56 @@ impl TeamMode {
             text: fence,
         }
         .emit();
-
         ExitCode::Ok
+    }
+
+    /// Barrier rounds (LoopDriver, cap `MAX_ROUNDS`: collect, then digest +
+    /// broadcast between rounds) followed by the unify call. Returns the
+    /// validated findings object, or the terminal exit on collapse / budget /
+    /// cancel. Does not emit the fence — `run` does, after shutting subagents
+    /// down — so the ordering invariant holds.
+    async fn rounds_and_unify(&self, system_prefix: &str) -> Result<Value, ExitCode> {
+        let driver = LoopDriver::new(MAX_ROUNDS);
+        let mut reports = String::new();
+        for round in 1..=driver.max_iterations {
+            if self.cancel.is_cancelled() {
+                return Err(self.cancel_exit());
+            }
+            reports = match self
+                .roster
+                .collect_outputs(
+                    CollectOutputsArgs {
+                        round,
+                        timeout_ms: 0,
+                    },
+                    &self.cancel,
+                )
+                .await
+            {
+                Ok(r) => r,
+                Err(e) => return Err(self.collapse(&e)),
+            };
+            if round == 1 && self.team_collapsed(&reports) {
+                return Err(self.collapse("all subagents crashed or produced no output"));
+            }
+            if !driver.is_final_round(round) {
+                let _ = self
+                    .roster
+                    .broadcast_summary(BroadcastSummaryArgs {
+                        round,
+                        summary: digest_of(&reports),
+                    })
+                    .await;
+            }
+        }
+
+        let unify_system = self.phase_system(system_prefix, self.validated.unify_prompt.as_deref());
+        let unify_msgs = vec![ChatMessage::User(format!(
+            "{}\n\n# Reviewer reports\n{reports}",
+            self.prompt
+        ))];
+        self.structured_call(&unify_system, &unify_msgs, &findings_schema())
+            .await
     }
 
     /// Phase system prompt: skills prefix + the phase prompt (or the profile's

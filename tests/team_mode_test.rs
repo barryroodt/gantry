@@ -180,11 +180,33 @@ async fn team_mode_completes_ok_spawns_plan_and_emits_unify_fence() {
         .count();
     assert_eq!(spawns, 2, "expected one spawn per planned reviewer");
 
-    let fence = events.iter().find_map(|e| match e {
-        GantryEvent::AssistantText { text, .. } if text.contains("```json") => Some(text.clone()),
-        _ => None,
-    });
-    let fence = fence.expect("terminal JSON fence emitted");
+    // ADR-0005 validation: one subagent_done per spawned subagent, each emitted
+    // before the terminal unify fence (clean shutdown + join, no leaked tasks).
+    let fence_idx = events
+        .iter()
+        .position(
+            |e| matches!(e, GantryEvent::AssistantText { text, .. } if text.contains("```json")),
+        )
+        .expect("terminal JSON fence emitted");
+    let done_idxs: Vec<usize> = events
+        .iter()
+        .enumerate()
+        .filter_map(|(i, e)| matches!(e, GantryEvent::SubagentDone { .. }).then_some(i))
+        .collect();
+    assert_eq!(
+        done_idxs.len(),
+        2,
+        "expected one subagent_done per spawned subagent"
+    );
+    assert!(
+        done_idxs.iter().all(|&i| i < fence_idx),
+        "every subagent_done must precede the fence (done {done_idxs:?}, fence {fence_idx})"
+    );
+
+    let fence = match &events[fence_idx] {
+        GantryEvent::AssistantText { text, .. } => text,
+        _ => unreachable!(),
+    };
     assert!(
         fence.contains("\"verdict\""),
         "fence missing verdict: {fence}"

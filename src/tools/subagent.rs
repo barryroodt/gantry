@@ -73,6 +73,7 @@ pub struct SubagentHandle {
     pub role: String,
     pub messages_tx: tokio::sync::mpsc::UnboundedSender<String>,
     pub outputs_rx: tokio::sync::Mutex<tokio::sync::mpsc::UnboundedReceiver<String>>,
+    pub join: tokio::task::JoinHandle<()>,
 }
 
 impl SubagentRoster {
@@ -111,7 +112,7 @@ impl SubagentRoster {
             &args.scope,
             args.extra_context.as_deref(),
         );
-        tokio::spawn(async move {
+        let join = tokio::spawn(async move {
             // The first user turn keeps the "Role: " prefix so the subagent's
             // assignment is explicit in its history.
             let mut messages: Vec<ChatMessage> = vec![ChatMessage::User(format!(
@@ -220,6 +221,7 @@ impl SubagentRoster {
             role,
             messages_tx: msg_tx,
             outputs_rx: tokio::sync::Mutex::new(find_rx),
+            join,
         });
         Ok(format!("subagent spawned: {name}"))
     }
@@ -275,6 +277,22 @@ impl SubagentRoster {
             }));
         }
         Ok(serde_json::json!({ "round": args.round, "subagents": subagents }).to_string())
+    }
+
+    /// Terminate all spawned subagents and wait for them to finish. Dropping a
+    /// subagent's input channel makes its loop's `recv` return `None`, so it
+    /// breaks and emits `subagent_done`; joining the task guarantees that event
+    /// is observed. Called after the final round so every `subagent_done`
+    /// precedes the coordinator's unify fence and no task outlives the run.
+    pub async fn shutdown_and_join(&self) {
+        let handles = std::mem::take(&mut *self.subagents.lock().await);
+        for handle in handles {
+            let SubagentHandle {
+                messages_tx, join, ..
+            } = handle;
+            drop(messages_tx);
+            let _ = join.await;
+        }
     }
 }
 

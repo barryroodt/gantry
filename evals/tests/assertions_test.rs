@@ -2,7 +2,8 @@ use gantry::events::{ExitCode, GantryEvent};
 use gantry_evals::{
     assert_duration, assert_exit_matches, assert_findings_in_range, assert_forbidden_message_regex,
     assert_message_regex_matches, assert_required_paths, assert_required_severities,
-    assert_single_json_fence, assert_token_budget, assert_tool_call_pairing, run_all, Expected,
+    assert_single_json_fence, assert_subagent_lifecycle, assert_token_budget,
+    assert_tool_call_pairing, run_all, Expected,
 };
 
 fn base_expected() -> Expected {
@@ -270,4 +271,40 @@ fn run_all_collects_multiple_failures() {
         failures.len() >= 2,
         "expected multiple failures, got {failures:?}"
     );
+}
+
+#[test]
+fn assert_subagent_lifecycle_pass_and_fail() {
+    let spawn = |name: &str| GantryEvent::SubagentSpawn {
+        ts: 1,
+        name: name.into(),
+        template: "t".into(),
+        scope: "full".into(),
+    };
+    let done = |name: &str| GantryEvent::SubagentDone {
+        ts: 2,
+        name: name.into(),
+        turns: 2,
+        input_tokens: 1,
+        output_tokens: 1,
+    };
+
+    // Pass: one done per spawn, all before the fence.
+    let pass = vec![spawn("a"), spawn("b"), done("a"), done("b"), fence("[]")];
+    assert!(assert_subagent_lifecycle(&pass).is_ok());
+
+    // Pass: no subagents (single mode) → vacuous.
+    assert!(assert_subagent_lifecycle(&[fence("[]")]).is_ok());
+
+    // Fail: a spawned subagent never finished.
+    let missing = vec![spawn("a"), spawn("b"), done("a"), fence("[]")];
+    let f = assert_subagent_lifecycle(&missing).unwrap_err();
+    assert_eq!(f.rule, "assert_subagent_lifecycle");
+    assert!(f.detail.contains("one subagent_done per spawned subagent"));
+
+    // Fail: a subagent finished after the unify fence.
+    let late = vec![spawn("a"), spawn("b"), done("a"), fence("[]"), done("b")];
+    let f = assert_subagent_lifecycle(&late).unwrap_err();
+    assert_eq!(f.rule, "assert_subagent_lifecycle");
+    assert!(f.detail.contains("after the unify fence"));
 }
