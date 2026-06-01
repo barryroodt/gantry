@@ -34,10 +34,22 @@ fn write_minimal_fixture(root: &std::path::Path) {
 }
 
 fn gantry_binary() -> Option<PathBuf> {
-    std::env::var("CARGO_BIN_EXE_gantry")
+    if let Some(p) = std::env::var("CARGO_BIN_EXE_gantry")
         .ok()
         .map(PathBuf::from)
         .filter(|path| path.exists())
+    {
+        return Some(p);
+    }
+    // `gantry-evals` is a separate crate, so CARGO_BIN_EXE_gantry is unset under
+    // `cargo test -p gantry-evals`. Fall back to the shared workspace target dir.
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()?
+        .to_path_buf();
+    ["debug", "release"]
+        .iter()
+        .map(|profile| root.join("target").join(profile).join("gantry"))
+        .find(|p| p.exists())
 }
 
 #[tokio::test]
