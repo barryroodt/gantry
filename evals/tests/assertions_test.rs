@@ -10,6 +10,8 @@ fn base_expected() -> Expected {
     Expected {
         fixture: "test".into(),
         exit: "ok".into(),
+        mode: None,
+        profile: None,
         max_tokens: None,
         min_findings: None,
         max_findings: None,

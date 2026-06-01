@@ -12,6 +12,8 @@ fn write_minimal_fixture(root: &std::path::Path) {
     let expected = Expected {
         fixture: "minimal".into(),
         exit: "ok".into(),
+        mode: None,
+        profile: None,
         max_tokens: None,
         min_findings: None,
         max_findings: None,
@@ -100,4 +102,38 @@ fn minimal_fixture_layout_is_valid() {
         .current_dir(dir.path().join("repo"))
         .output()
         .expect("git init in repo");
+}
+
+#[tokio::test]
+async fn team_fixture_003_runs_live() {
+    let Some(binary) = gantry_binary() else {
+        eprintln!("skipping team_fixture_003_runs_live: gantry binary not built");
+        return;
+    };
+    if std::env::var("ANTHROPIC_API_KEY").is_err() {
+        eprintln!("skipping team_fixture_003_runs_live: ANTHROPIC_API_KEY not set");
+        return;
+    }
+
+    // The real team fixture, run end-to-end in team mode with the review profile
+    // against the eval model. run_all's assertions enforce the orchestration
+    // contract: one subagent_done per spawned subagent before the single JSON
+    // fence, exit ok, and >= 1 finding.
+    let fixture =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("fixtures/003-team-mode-multi-dir");
+    let runner = FixtureRunner {
+        binary_path: binary,
+        fixtures_dir: fixture.parent().unwrap().to_path_buf(),
+        max_parallel: 1,
+    };
+
+    let result = runner
+        .run_one(&fixture)
+        .await
+        .expect("run 003 team fixture");
+    assert!(
+        result.passed,
+        "003 team fixture failed live: {:?}",
+        result.failures
+    );
 }

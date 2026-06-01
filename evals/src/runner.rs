@@ -76,6 +76,11 @@ impl FixtureRunner {
         emit_spend_summary(cumulative_spend, SPEND_CAP_USD, false);
         Ok(results)
     }
+
+    /// Run a single fixture directory (used by focused / live validation tests).
+    pub async fn run_one(&self, dir: &Path) -> Result<FixtureResult> {
+        run_fixture(&self.binary_path, dir).await
+    }
 }
 
 async fn run_fixture(binary: &Path, dir: &Path) -> Result<FixtureResult> {
@@ -101,23 +106,38 @@ async fn run_fixture(binary: &Path, dir: &Path) -> Result<FixtureResult> {
     // Per-fixture token cap (spec): the budget-trip fixture trips at a low cap
     // without affecting the others. Defaults to 200k when unset.
     let max_tokens = expected.max_tokens.unwrap_or(200_000).to_string();
+    let mode = expected.mode.as_deref().unwrap_or("single").to_string();
+    let workdir = tmpdir.path().display().to_string();
+    let prompt = prompt_file.display().to_string();
+
+    let mut args: Vec<String> = vec![
+        "--mode".into(),
+        mode,
+        "--model".into(),
+        DEFAULT_EVAL_MODEL.into(),
+        "--workdir".into(),
+        workdir,
+        "--prompt-file".into(),
+        prompt,
+        "--max-tokens".into(),
+        max_tokens,
+        "--timeout-ms".into(),
+        "300000".into(),
+    ];
+    // Team fixtures supply a profile for the compose/unify prompts; resolve it
+    // against the gantry crate root so the runner's cwd does not matter.
+    if let Some(profile) = &expected.profile {
+        let profile_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("gantry crate root")
+            .join(profile);
+        args.push("--profile".into());
+        args.push(profile_path.display().to_string());
+    }
 
     let start = std::time::Instant::now();
     let out = Command::new(binary)
-        .args([
-            "--mode",
-            "single",
-            "--model",
-            DEFAULT_EVAL_MODEL,
-            "--workdir",
-            &tmpdir.path().display().to_string(),
-            "--prompt-file",
-            &prompt_file.display().to_string(),
-            "--max-tokens",
-            &max_tokens,
-            "--timeout-ms",
-            "300000",
-        ])
+        .args(&args)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .output()

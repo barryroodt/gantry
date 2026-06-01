@@ -1,5 +1,7 @@
 {
   "fixture": "003-team-mode-multi-dir",
   "exit": "ok",
-  "min_findings": 1
+  "min_findings": 1,
+  "mode": "team",
+  "profile": "profiles/review"
 }

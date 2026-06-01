@@ -12,6 +12,14 @@ pub struct Expected {
     /// Expected terminal exit: "ok" | "budget" | "timeout" | "error" | "config".
     pub exit: String,
 
+    /// Run mode for this fixture: "single" (default) or "team".
+    #[serde(default)]
+    pub mode: Option<String>,
+    /// Profile directory (relative to the gantry crate root) passed as
+    /// `--profile`; team fixtures need it for the compose/unify prompts.
+    #[serde(default)]
+    pub profile: Option<String>,
+
     /// Token cap passed to the binary as `--max-tokens` for this fixture. Lets
     /// the budget-trip fixture trip at a low cap without affecting others.
     #[serde(default)]
