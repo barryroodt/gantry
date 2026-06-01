@@ -1,3 +1,5 @@
+pub mod ast_edit;
+pub mod ast_grep;
 pub mod find_files;
 pub mod git_diff;
 pub mod list_files;
