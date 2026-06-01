@@ -1,41 +1,66 @@
-//! Regression guard: the extracted review profile under `docs/profiles/review/`
-//! reproduces the pre-SP1 hardcoded prompts, so wrily's `--system-file` /
-//! `--subagent-system-file` migration preserves review behavior. The harness's
-//! `{skill_prefix}\n{system_body}` composition is exercised in
-//! `single_mode_test` / `team_mode_test`; this file pins the profile *content*.
+//! Regression guard for the shipped `profiles/review/` profile (ADR-0004):
+//! it must load and carry the review output contract + reviewer format, so
+//! `--profile profiles/review` reproduces review behavior.
 
-const REVIEW_SINGLE_SYSTEM: &str = include_str!("../docs/profiles/review/single-system.md");
-const REVIEW_TEAM_SYSTEM: &str = include_str!("../docs/profiles/review/team-system.md");
-const REVIEW_SUBAGENT_SYSTEM: &str = include_str!("../docs/profiles/review/reviewer-system.md");
+use gantry::cli::Mode;
+use gantry::profile::load_profile;
+use std::path::{Path, PathBuf};
+
+fn review_profile_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("profiles/review")
+}
 
 #[test]
-fn review_single_profile_matches_pre_sp1_prompt() {
-    assert_eq!(
-        REVIEW_SINGLE_SYSTEM.trim_end(),
-        "You are gantry running a code review task. Use the available tools."
+fn review_profile_loads_with_team_mode_and_tools() {
+    let p = load_profile(&review_profile_dir()).expect("load review profile");
+    assert_eq!(p.mode, Some(Mode::Team));
+    for t in [
+        "read_file",
+        "spawn_subagent",
+        "collect_outputs",
+        "broadcast_summary",
+    ] {
+        assert!(
+            p.tools.iter().any(|x| x == t),
+            "review profile missing tool {t}"
+        );
+    }
+    assert!(
+        p.inject_skills.iter().any(|s| s == "code-review"),
+        "review profile missing code-review skill"
     );
 }
 
 #[test]
-fn review_team_profile_carries_persona_and_output_contract() {
+fn review_profile_system_carries_output_contract() {
+    let p = load_profile(&review_profile_dir()).expect("load");
+    let sys = p.system_prompt.expect("review profile has a system prompt");
     assert!(
-        REVIEW_TEAM_SYSTEM.contains("You are the Gantry team lead in an automated CI code review"),
-        "team profile lost its coordinator persona"
+        sys.contains("OUTPUT CONTRACT"),
+        "system lost the output contract"
     );
     assert!(
-        REVIEW_TEAM_SYSTEM.contains("OUTPUT CONTRACT"),
-        "team profile lost its output contract"
+        sys.contains("```json"),
+        "system lost the JSON fence requirement"
     );
     assert!(
-        REVIEW_TEAM_SYSTEM.contains("exactly ONE ```json fenced code block"),
-        "team profile lost its JSON-fence requirement"
+        sys.contains("spawn_subagent"),
+        "system lost orchestration guidance"
     );
 }
 
 #[test]
-fn review_subagent_profile_matches_pre_sp1_template() {
-    assert_eq!(
-        REVIEW_SUBAGENT_SYSTEM.trim_end(),
-        "You are a Gantry reviewer subagent. Read-only tools only. Emit markdown per output-format.md — no JSON fence."
+fn review_profile_subagent_carries_reviewer_format() {
+    let p = load_profile(&review_profile_dir()).expect("load");
+    let sub = p
+        .subagent_system_prompt
+        .expect("review profile has a subagent prompt");
+    assert!(
+        sub.contains("Reviewer Output Format"),
+        "subagent lost the output format"
+    );
+    assert!(
+        sub.contains("Verdict"),
+        "subagent lost the verdict structure"
     );
 }

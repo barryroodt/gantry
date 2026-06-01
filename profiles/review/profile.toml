@@ -1,0 +1,18 @@
+# Code-review profile (ADR-0004). Primary form is team mode; also runs in
+# single mode via `--profile profiles/review --mode single` — the system
+# prompt adapts when team tools are absent.
+mode = "team"
+system = "system.md"
+subagent_system = "subagent.md"
+tools = [
+    "read_file",
+    "list_files",
+    "find_files",
+    "git_diff",
+    "shell",
+    "skill_load",
+    "spawn_subagent",
+    "collect_outputs",
+    "broadcast_summary",
+]
+inject_skills = ["caveman-review", "agent-team-review", "code-review", "confidence-rating"]
