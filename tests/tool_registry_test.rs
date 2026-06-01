@@ -150,7 +150,7 @@ fn base_tool_names_const_matches_schemas() {
     let schemas = registry.schemas();
     let names: Vec<&str> = schemas.iter().map(|s| s.name.as_str()).collect();
     assert_eq!(names, BASE_TOOL_NAMES);
-    assert_eq!(available_tool_names(false), BASE_TOOL_NAMES);
+    assert_eq!(available_tool_names(), BASE_TOOL_NAMES);
 }
 
 #[test]

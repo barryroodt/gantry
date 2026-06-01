@@ -477,11 +477,12 @@ fn team_tool_rejected_in_single_mode() {
 }
 
 #[test]
-fn team_tool_allowed_in_team_mode() {
+fn orchestration_names_rejected_in_team_mode() {
     let workdir = temp_workdir("tool-team-in-team");
     let prompt = write_prompt_file(&workdir, "prompt.txt", "hello");
 
-    let validated = Cli::parse_and_validate_from([
+    // spawn_subagent is a roster operation, not a selectable tool (ADR-0005).
+    let err = Cli::parse_and_validate_from([
         "gantry",
         "--mode",
         "team",
@@ -497,12 +498,13 @@ fn team_tool_allowed_in_team_mode() {
         "60000",
         "--tool",
         "spawn_subagent",
-        "--tool",
-        "read_file",
     ])
-    .expect("parse_and_validate");
+    .unwrap_err();
 
-    assert_eq!(validated.tools, ["spawn_subagent", "read_file"]);
+    assert!(
+        matches!(err, ConfigError::UnknownTool { .. }),
+        "got {err:?}"
+    );
 }
 
 #[test]
@@ -545,7 +547,7 @@ fn parses_profile_into_validated() {
     let profile_dir = workdir.join("prof");
     write_profile(
         &profile_dir,
-        "mode = \"team\"\nsystem = \"system.md\"\nsubagent_system = \"subagent.md\"\ntools = [\"read_file\", \"spawn_subagent\"]\ninject_skills = [\"code-review\"]\n",
+        "mode = \"team\"\nsystem = \"system.md\"\nsubagent_system = \"subagent.md\"\ntools = [\"read_file\", \"git_diff\"]\ninject_skills = [\"code-review\"]\n",
         &[("system.md", "PROFILE SYSTEM"), ("subagent.md", "PROFILE SUBAGENT")],
     );
 
@@ -572,7 +574,7 @@ fn parses_profile_into_validated() {
         validated.subagent_system_prompt.as_deref(),
         Some("PROFILE SUBAGENT")
     );
-    assert_eq!(validated.tools, ["read_file", "spawn_subagent"]);
+    assert_eq!(validated.tools, ["read_file", "git_diff"]);
     assert_eq!(validated.inject_skills, ["code-review"]);
 }
 
@@ -584,7 +586,7 @@ fn explicit_flags_override_profile() {
     let profile_dir = workdir.join("prof");
     write_profile(
         &profile_dir,
-        "mode = \"team\"\nsystem = \"system.md\"\ntools = [\"read_file\", \"spawn_subagent\"]\ninject_skills = [\"code-review\"]\n",
+        "mode = \"team\"\nsystem = \"system.md\"\ntools = [\"read_file\", \"git_diff\"]\ninject_skills = [\"code-review\"]\n",
         &[("system.md", "PROFILE SYSTEM")],
     );
 
@@ -702,7 +704,7 @@ fn review_profile_single_mode_drops_team_tools() {
 }
 
 #[test]
-fn review_profile_team_mode_keeps_team_tools() {
+fn review_profile_team_mode_yields_base_tools() {
     let workdir = temp_workdir("review-team");
     let prompt = write_prompt_file(&workdir, "prompt.txt", "hello");
     let review = concat!(env!("CARGO_MANIFEST_DIR"), "/profiles/review");
@@ -725,5 +727,6 @@ fn review_profile_team_mode_keeps_team_tools() {
     .expect("team-mode review profile validates");
 
     assert_eq!(validated.mode, Mode::Team);
-    assert!(validated.tools.iter().any(|t| t == "spawn_subagent"));
+    assert!(validated.tools.iter().any(|t| t == "read_file"));
+    assert!(!validated.tools.iter().any(|t| t == "spawn_subagent"));
 }

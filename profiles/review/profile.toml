@@ -1,6 +1,6 @@
-# Code-review profile (ADR-0004). Primary form is team mode; also runs in
-# single mode via `--profile profiles/review --mode single` — the system
-# prompt adapts when team tools are absent.
+# Code-review profile (ADR-0004/0005). Team mode is the primary form: the
+# harness drives orchestration and consults the model only at `compose` and
+# `unify`. Also runs in single mode (`--mode single`), which uses `system`.
 mode = "team"
 system = "system.md"
 subagent_system = "subagent.md"
@@ -13,8 +13,5 @@ tools = [
     "git_diff",
     "shell",
     "skill_load",
-    "spawn_subagent",
-    "collect_outputs",
-    "broadcast_summary",
 ]
 inject_skills = ["caveman-review", "agent-team-review", "code-review", "confidence-rating"]

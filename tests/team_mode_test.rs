@@ -129,14 +129,7 @@ fn build_team(dir: &TempDir, validated: Validated, provider: Arc<dyn ProviderAda
     let meter = Arc::new(TokenMeter::new(validated.max_tokens, cancel.clone()));
     let _watchdog = spawn_timeout_watchdog(cancel.clone(), validated.timeout_ms);
     let roster = Arc::new(SubagentRoster::new());
-    let registry = ToolRegistry::team(
-        validated.workdir.clone(),
-        roster.clone(),
-        provider.clone(),
-        "subagent base".into(),
-        meter.clone(),
-        vec![],
-    );
+    let registry = Arc::new(ToolRegistry::new(validated.workdir.clone(), vec![]));
     TeamMode {
         validated,
         meter,

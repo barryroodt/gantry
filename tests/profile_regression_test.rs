@@ -14,15 +14,16 @@ fn review_profile_dir() -> PathBuf {
 fn review_profile_loads_with_team_mode_and_tools() {
     let p = load_profile(&review_profile_dir()).expect("load review profile");
     assert_eq!(p.mode, Some(Mode::Team));
-    for t in [
-        "read_file",
-        "spawn_subagent",
-        "collect_outputs",
-        "broadcast_summary",
-    ] {
+    for t in ["read_file", "git_diff", "skill_load"] {
         assert!(
             p.tools.iter().any(|x| x == t),
-            "review profile missing tool {t}"
+            "review profile missing base tool {t}"
+        );
+    }
+    for t in ["spawn_subagent", "collect_outputs", "broadcast_summary"] {
+        assert!(
+            !p.tools.iter().any(|x| x == t),
+            "orchestration name {t} must not be a profile tool (now harness-internal)"
         );
     }
     assert!(
@@ -42,10 +43,6 @@ fn review_profile_system_carries_output_contract() {
     assert!(
         sys.contains("```json"),
         "system lost the JSON fence requirement"
-    );
-    assert!(
-        sys.contains("spawn_subagent"),
-        "system lost orchestration guidance"
     );
 }
 

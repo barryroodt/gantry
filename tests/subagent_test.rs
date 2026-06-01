@@ -1,4 +1,5 @@
-use std::sync::{Arc, Mutex};
+use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -8,7 +9,9 @@ use gantry::emitter::TestEmitterGuard;
 use gantry::events::GantryEvent;
 use gantry::meter::TokenMeter;
 use gantry::provider::{ChatMessage, ProviderAdapter, ProviderResponse, ToolSchema};
-use gantry::tools::subagent::SubagentRoster;
+use gantry::tools::subagent::{
+    BroadcastSummaryArgs, CollectOutputsArgs, SpawnSubagentArgs, SubagentRoster,
+};
 use gantry::tools::ToolRegistry;
 use tempfile::TempDir;
 
@@ -17,20 +20,22 @@ fn test_meter() -> Arc<TokenMeter> {
     Arc::new(TokenMeter::new(1_000_000, shared_token()))
 }
 
+/// Stateless-after-construction provider keyed on the subagent role and round.
+/// `complete` only reads `responses`, so no interior mutability is needed.
 struct RoleTextProvider {
     /// Maps role string -> list of responses (first round, second round, …).
-    responses: Arc<Mutex<std::collections::HashMap<String, Vec<String>>>>,
+    responses: HashMap<String, Vec<String>>,
 }
 
 impl RoleTextProvider {
     fn new() -> Self {
         Self {
-            responses: Arc::new(Mutex::new(std::collections::HashMap::new())),
+            responses: HashMap::new(),
         }
     }
 
-    fn with_role(self, role: &str, texts: Vec<&str>) -> Self {
-        self.responses.lock().unwrap().insert(
+    fn with_role(mut self, role: &str, texts: Vec<&str>) -> Self {
+        self.responses.insert(
             role.to_string(),
             texts.into_iter().map(String::from).collect(),
         );
@@ -77,8 +82,6 @@ impl ProviderAdapter for RoleTextProvider {
 
         let text = self
             .responses
-            .lock()
-            .unwrap()
             .get(&role)
             .and_then(|v| v.get(round_index))
             .cloned()
@@ -95,35 +98,55 @@ impl ProviderAdapter for RoleTextProvider {
     }
 }
 
+/// Spawn one reviewer through the roster (the post-ADR-0005 mechanism the
+/// harness drives directly — no registry tool dispatch). Returns the spawn ack.
+async fn spawn_reviewer(
+    roster: &SubagentRoster,
+    provider: &Arc<dyn ProviderAdapter>,
+    registry: &Arc<ToolRegistry>,
+    meter: &Arc<TokenMeter>,
+    name: &str,
+    role: &str,
+) -> String {
+    roster
+        .spawn_subagent(
+            SpawnSubagentArgs {
+                name: name.into(),
+                role: role.into(),
+                template: role.into(),
+                scope: "full".into(),
+                extra_context: None,
+            },
+            provider.clone(),
+            registry.clone(),
+            "reviewer system".into(),
+            meter.clone(),
+        )
+        .await
+        .expect("spawn_subagent")
+}
+
 #[tokio::test]
 async fn spawn_subagent_adds_to_roster_and_emits_subagent_spawn() {
     let guard = TestEmitterGuard::install();
     let dir = TempDir::new().unwrap();
     let roster = Arc::new(SubagentRoster::new());
-    let provider =
+    let provider: Arc<dyn ProviderAdapter> =
         Arc::new(RoleTextProvider::new().with_role("correctness", vec!["round-1 report"]));
-    let registry = ToolRegistry::team(
-        dir.path().to_path_buf(),
-        roster.clone(),
-        provider,
-        "reviewer system".into(),
-        test_meter(),
-        vec![],
-    );
+    let registry = Arc::new(ToolRegistry::new(dir.path().to_path_buf(), vec![]));
+    let meter = test_meter();
 
-    let out = registry
-        .dispatch(
-            "coordinator",
-            1,
-            "spawn_subagent",
-            r#"{"name":"correctness","role":"correctness","template":"correctness","scope":"full"}"#,
-        )
-        .await;
-
-    assert!(out.content.contains("subagent spawned: correctness"));
+    let ack = spawn_reviewer(
+        &roster,
+        &provider,
+        &registry,
+        &meter,
+        "correctness",
+        "correctness",
+    )
+    .await;
+    assert!(ack.contains("subagent spawned: correctness"));
     assert_eq!(roster.subagents.lock().await.len(), 1);
-
-    tokio::time::sleep(Duration::from_millis(100)).await;
 
     let events = guard.drain_events();
     assert!(
@@ -136,35 +159,10 @@ async fn spawn_subagent_adds_to_roster_and_emits_subagent_spawn() {
 }
 
 #[tokio::test]
-async fn team_registry_exposes_nine_tools_single_mode_exposes_six() {
-    let dir = TempDir::new().unwrap();
-    let single = ToolRegistry::new(dir.path().to_path_buf(), vec![]);
-    assert_eq!(single.schemas().len(), 6);
-    assert!(!single.schemas().iter().any(|s| s.name == "spawn_subagent"));
-
-    let roster = Arc::new(SubagentRoster::new());
-    let provider = Arc::new(RoleTextProvider::new());
-    let team = ToolRegistry::team(
-        dir.path().to_path_buf(),
-        roster,
-        provider,
-        "template".into(),
-        test_meter(),
-        vec![],
-    );
-    assert_eq!(team.schemas().len(), 9);
-    let schemas = team.schemas();
-    let names: Vec<&str> = schemas.iter().map(|s| s.name.as_str()).collect();
-    assert!(names.contains(&"spawn_subagent"));
-    assert!(names.contains(&"collect_outputs"));
-    assert!(names.contains(&"broadcast_summary"));
-}
-
-#[tokio::test]
 async fn broadcast_summary_delivers_to_all_spawned_subagents() {
     let dir = TempDir::new().unwrap();
     let roster = Arc::new(SubagentRoster::new());
-    let provider = Arc::new(
+    let provider: Arc<dyn ProviderAdapter> = Arc::new(
         RoleTextProvider::new()
             .with_role(
                 "correctness",
@@ -175,106 +173,94 @@ async fn broadcast_summary_delivers_to_all_spawned_subagents() {
                 vec!["first spec", "after broadcast spec"],
             ),
     );
-    let registry = ToolRegistry::team(
-        dir.path().to_path_buf(),
-        roster.clone(),
-        provider,
-        "reviewer system".into(),
-        test_meter(),
-        vec![],
-    );
+    let registry = Arc::new(ToolRegistry::new(dir.path().to_path_buf(), vec![]));
+    let meter = test_meter();
 
-    registry
-        .dispatch(
-            "coordinator",
-            1,
-            "spawn_subagent",
-            r#"{"name":"correctness","role":"correctness","template":"correctness","scope":"full"}"#,
+    spawn_reviewer(
+        &roster,
+        &provider,
+        &registry,
+        &meter,
+        "correctness",
+        "correctness",
+    )
+    .await;
+    spawn_reviewer(
+        &roster,
+        &provider,
+        &registry,
+        &meter,
+        "spec-compliance",
+        "spec-compliance",
+    )
+    .await;
+
+    let round1 = roster
+        .collect_outputs(
+            CollectOutputsArgs {
+                round: 1,
+                timeout_ms: 0,
+            },
+            &shared_token(),
         )
-        .await;
-    registry
-        .dispatch(
-            "coordinator",
-            1,
-            "spawn_subagent",
-            r#"{"name":"spec-compliance","role":"spec-compliance","template":"spec-compliance","scope":"full"}"#,
+        .await
+        .unwrap();
+    assert!(round1.contains("first correctness"));
+    assert!(round1.contains("first spec"));
+
+    let broadcast = roster
+        .broadcast_summary(BroadcastSummaryArgs {
+            round: 1,
+            summary: "cross-review digest".into(),
+        })
+        .await
+        .unwrap();
+    assert!(broadcast.contains("broadcast to 2 subagents"));
+
+    let round2 = roster
+        .collect_outputs(
+            CollectOutputsArgs {
+                round: 2,
+                timeout_ms: 0,
+            },
+            &shared_token(),
         )
-        .await;
-
-    tokio::time::sleep(Duration::from_millis(100)).await;
-
-    let round1 = registry
-        .dispatch("coordinator", 2, "collect_outputs", r#"{"round":1}"#)
-        .await;
-    assert!(round1.content.contains("first correctness"));
-    assert!(round1.content.contains("first spec"));
-
-    let broadcast = registry
-        .dispatch(
-            "coordinator",
-            3,
-            "broadcast_summary",
-            r#"{"round":1,"summary":"cross-review digest"}"#,
-        )
-        .await;
-    assert!(broadcast.content.contains("broadcast to 2 subagents"));
-
-    tokio::time::sleep(Duration::from_millis(150)).await;
-
-    let round2 = registry
-        .dispatch("coordinator", 4, "collect_outputs", r#"{"round":2}"#)
-        .await;
-    assert!(round2.content.contains("after broadcast correctness"));
-    assert!(round2.content.contains("after broadcast spec"));
+        .await
+        .unwrap();
+    assert!(round2.contains("after broadcast correctness"));
+    assert!(round2.contains("after broadcast spec"));
 }
 
 #[tokio::test]
 async fn collect_outputs_drains_text_from_finished_subagents_in_order() {
     let dir = TempDir::new().unwrap();
     let roster = Arc::new(SubagentRoster::new());
-    let provider = Arc::new(
+    let provider: Arc<dyn ProviderAdapter> = Arc::new(
         RoleTextProvider::new()
             .with_role("alpha", vec!["alpha report"])
             .with_role("beta", vec!["beta report"]),
     );
-    let registry = ToolRegistry::team(
-        dir.path().to_path_buf(),
-        roster.clone(),
-        provider,
-        "reviewer system".into(),
-        test_meter(),
-        vec![],
-    );
+    let registry = Arc::new(ToolRegistry::new(dir.path().to_path_buf(), vec![]));
+    let meter = test_meter();
 
-    registry
-        .dispatch(
-            "coordinator",
-            1,
-            "spawn_subagent",
-            r#"{"name":"alpha","role":"alpha","template":"alpha","scope":"full"}"#,
+    spawn_reviewer(&roster, &provider, &registry, &meter, "alpha", "alpha").await;
+    spawn_reviewer(&roster, &provider, &registry, &meter, "beta", "beta").await;
+
+    let out = roster
+        .collect_outputs(
+            CollectOutputsArgs {
+                round: 1,
+                timeout_ms: 0,
+            },
+            &shared_token(),
         )
-        .await;
-    registry
-        .dispatch(
-            "coordinator",
-            1,
-            "spawn_subagent",
-            r#"{"name":"beta","role":"beta","template":"beta","scope":"full"}"#,
-        )
-        .await;
-
-    tokio::time::sleep(Duration::from_millis(100)).await;
-
-    let out = registry
-        .dispatch("coordinator", 2, "collect_outputs", r#"{"round":1}"#)
-        .await;
-
-    let alpha_pos = out.content.find("alpha report").expect("alpha report");
-    let beta_pos = out.content.find("beta report").expect("beta report");
+        .await
+        .unwrap();
+    let alpha_pos = out.find("alpha report").expect("alpha report");
+    let beta_pos = out.find("beta report").expect("beta report");
     assert!(
         alpha_pos < beta_pos,
-        "expected spawn order (alpha before beta), got: {}",
-        out.content
+        "expected name-sorted order, got: {out}"
     );
 }
 
@@ -282,65 +268,64 @@ async fn collect_outputs_drains_text_from_finished_subagents_in_order() {
 async fn partial_failure_one_reviewer_panics_broadcast_and_collect_still_work() {
     let dir = TempDir::new().unwrap();
     let roster = Arc::new(SubagentRoster::new());
-    let provider = Arc::new(
+    let provider: Arc<dyn ProviderAdapter> = Arc::new(
         RoleTextProvider::new()
             .with_role("panic-role", vec!["never emitted"])
             .with_role("healthy", vec!["healthy round 1", "healthy round 2"]),
     );
-    let registry = ToolRegistry::team(
-        dir.path().to_path_buf(),
-        roster.clone(),
-        provider,
-        "reviewer system".into(),
-        test_meter(),
-        vec![],
-    );
+    let registry = Arc::new(ToolRegistry::new(dir.path().to_path_buf(), vec![]));
+    let meter = test_meter();
 
-    registry
-        .dispatch(
-            "coordinator",
-            1,
-            "spawn_subagent",
-            r#"{"name":"broken","role":"panic-role","template":"panic-role","scope":"full"}"#,
+    spawn_reviewer(
+        &roster,
+        &provider,
+        &registry,
+        &meter,
+        "broken",
+        "panic-role",
+    )
+    .await;
+    spawn_reviewer(&roster, &provider, &registry, &meter, "healthy", "healthy").await;
+
+    let round1 = roster
+        .collect_outputs(
+            CollectOutputsArgs {
+                round: 1,
+                timeout_ms: 0,
+            },
+            &shared_token(),
         )
-        .await;
-    registry
-        .dispatch(
-            "coordinator",
-            1,
-            "spawn_subagent",
-            r#"{"name":"healthy","role":"healthy","template":"healthy","scope":"full"}"#,
+        .await
+        .unwrap();
+    assert!(round1.contains("healthy round 1"));
+    assert!(!round1.contains("never emitted"));
+
+    let broadcast = roster
+        .broadcast_summary(BroadcastSummaryArgs {
+            round: 1,
+            summary: "digest".into(),
+        })
+        .await
+        .unwrap();
+    assert!(broadcast.contains("broadcast to 2 subagents"));
+
+    let round2 = roster
+        .collect_outputs(
+            CollectOutputsArgs {
+                round: 2,
+                timeout_ms: 0,
+            },
+            &shared_token(),
         )
-        .await;
-
-    tokio::time::sleep(Duration::from_millis(100)).await;
-
-    let round1 = registry
-        .dispatch("coordinator", 2, "collect_outputs", r#"{"round":1}"#)
-        .await;
-    assert!(round1.content.contains("healthy round 1"));
-    assert!(!round1.content.contains("never emitted"));
-
-    let broadcast = registry
-        .dispatch(
-            "coordinator",
-            3,
-            "broadcast_summary",
-            r#"{"round":1,"summary":"digest"}"#,
-        )
-        .await;
-    assert!(broadcast.content.contains("broadcast to 2 subagents"));
-
-    tokio::time::sleep(Duration::from_millis(150)).await;
-
-    let round2 = registry
-        .dispatch("coordinator", 4, "collect_outputs", r#"{"round":2}"#)
-        .await;
-    assert!(round2.content.contains("healthy round 2"));
+        .await
+        .unwrap();
+    assert!(round2.contains("healthy round 2"));
 }
 
 #[tokio::test]
-async fn single_mode_rejects_subagent_tools() {
+async fn orchestration_tools_are_not_dispatchable() {
+    // After ADR-0005 the orchestration ops are roster methods, not LLM tools:
+    // the registry no longer dispatches them in any mode.
     let registry = ToolRegistry::new(std::env::temp_dir(), vec![]);
     let out = registry
         .dispatch(
@@ -351,9 +336,46 @@ async fn single_mode_rejects_subagent_tools() {
         )
         .await;
     assert!(
-        out.content.contains("team tools unavailable"),
-        "unexpected: {}",
+        out.content.contains("unknown tool: spawn_subagent"),
+        "orchestration name should not be a dispatchable tool: {}",
         out.content
+    );
+}
+
+#[tokio::test]
+async fn collect_outputs_returns_structured_name_sorted_status() {
+    let _guard = TestEmitterGuard::install();
+    let dir = TempDir::new().unwrap();
+    let roster = Arc::new(SubagentRoster::new());
+    let provider: Arc<dyn ProviderAdapter> = Arc::new(
+        RoleTextProvider::new()
+            .with_role("alpha", vec!["alpha report"])
+            .with_role("beta", vec!["beta report"]),
+    );
+    let registry = Arc::new(ToolRegistry::new(dir.path().to_path_buf(), vec![]));
+    let meter = test_meter();
+
+    // Spawn out of name order to prove collect_outputs sorts by name.
+    spawn_reviewer(&roster, &provider, &registry, &meter, "beta", "beta").await;
+    spawn_reviewer(&roster, &provider, &registry, &meter, "alpha", "alpha").await;
+
+    let c = roster
+        .collect_outputs(
+            CollectOutputsArgs {
+                round: 1,
+                timeout_ms: 0,
+            },
+            &shared_token(),
+        )
+        .await
+        .unwrap();
+    let ai = c.find(r#""name":"alpha""#).expect("alpha present");
+    let bi = c.find(r#""name":"beta""#).expect("beta present");
+    assert!(ai < bi, "subagents not name-sorted: {c}");
+    assert!(c.contains(r#""status":"complete""#), "missing status: {c}");
+    assert!(
+        c.contains("alpha report") && c.contains("beta report"),
+        "missing reports: {c}"
     );
 }
 
@@ -388,89 +410,28 @@ impl ProviderAdapter for SlowProvider {
 }
 
 #[tokio::test]
-async fn collect_outputs_returns_structured_name_sorted_status() {
-    let _guard = TestEmitterGuard::install();
-    let dir = TempDir::new().unwrap();
-    let roster = Arc::new(SubagentRoster::new());
-    let provider = Arc::new(
-        RoleTextProvider::new()
-            .with_role("alpha", vec!["alpha report"])
-            .with_role("beta", vec!["beta report"]),
-    );
-    let registry = ToolRegistry::team(
-        dir.path().to_path_buf(),
-        roster.clone(),
-        provider,
-        "subagent base".into(),
-        test_meter(),
-        vec![],
-    );
-    // Spawn out of name order to prove collect_outputs sorts by name.
-    registry
-        .dispatch(
-            "coordinator",
-            1,
-            "spawn_subagent",
-            r#"{"name":"beta","role":"beta","template":"beta","scope":"full"}"#,
-        )
-        .await;
-    registry
-        .dispatch(
-            "coordinator",
-            1,
-            "spawn_subagent",
-            r#"{"name":"alpha","role":"alpha","template":"alpha","scope":"full"}"#,
-        )
-        .await;
-
-    let out = registry
-        .dispatch("coordinator", 2, "collect_outputs", r#"{"round":1}"#)
-        .await;
-    let c = &out.content;
-    let ai = c.find(r#""name":"alpha""#).expect("alpha present");
-    let bi = c.find(r#""name":"beta""#).expect("beta present");
-    assert!(ai < bi, "subagents not name-sorted: {c}");
-    assert!(c.contains(r#""status":"complete""#), "missing status: {c}");
-    assert!(
-        c.contains("alpha report") && c.contains("beta report"),
-        "missing reports: {c}"
-    );
-}
-
-#[tokio::test]
 async fn collect_outputs_times_out_slow_subagent() {
     let _guard = TestEmitterGuard::install();
     let dir = TempDir::new().unwrap();
     let roster = Arc::new(SubagentRoster::new());
-    let provider = Arc::new(SlowProvider { delay_ms: 1000 });
-    let registry = ToolRegistry::team(
-        dir.path().to_path_buf(),
-        roster.clone(),
-        provider,
-        "base".into(),
-        test_meter(),
-        vec![],
-    );
-    registry
-        .dispatch(
-            "coordinator",
-            1,
-            "spawn_subagent",
-            r#"{"name":"slow","role":"slow","template":"slow","scope":"full"}"#,
-        )
-        .await;
+    let provider: Arc<dyn ProviderAdapter> = Arc::new(SlowProvider { delay_ms: 1000 });
+    let registry = Arc::new(ToolRegistry::new(dir.path().to_path_buf(), vec![]));
+    let meter = test_meter();
 
-    let out = registry
-        .dispatch(
-            "coordinator",
-            2,
-            "collect_outputs",
-            r#"{"round":1,"timeout_ms":50}"#,
+    spawn_reviewer(&roster, &provider, &registry, &meter, "slow", "slow").await;
+
+    let out = roster
+        .collect_outputs(
+            CollectOutputsArgs {
+                round: 1,
+                timeout_ms: 50,
+            },
+            &shared_token(),
         )
-        .await;
+        .await
+        .unwrap();
     assert!(
-        out.content.contains(r#""status":"timeout""#),
-        "expected timeout status: {}",
-        out.content
+        out.contains(r#""status":"timeout""#),
+        "expected timeout status: {out}"
     );
 }

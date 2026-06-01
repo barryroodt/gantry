@@ -224,10 +224,10 @@ impl Cli {
         let compose_prompt = profile.as_ref().and_then(|p| p.compose_prompt.clone());
         let unify_prompt = profile.as_ref().and_then(|p| p.unify_prompt.clone());
 
-        let available = crate::tools::registry::available_tool_names(mode == Mode::Team);
+        let available = crate::tools::registry::available_tool_names();
         let tools = if self.tools.is_empty() {
-            // Profile tools are a cross-mode template: keep only those available
-            // in the active mode (e.g. team tools are dropped in single mode).
+            // Profile tools are a template validated against the available set;
+            // unknown names (e.g. legacy orchestration names) are dropped.
             profile
                 .as_ref()
                 .map(|p| {
