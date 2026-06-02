@@ -111,4 +111,31 @@ mod tests {
         );
         assert!(out.contains("no edits"), "summary: {out}");
     }
+
+    #[tokio::test]
+    async fn confined_to_workdir_no_escape() {
+        // Escaping globs must never reach files above the workdir (mutating tool).
+        let root = TempDir::new().unwrap();
+        let work = root.path().join("work");
+        std::fs::create_dir(&work).unwrap();
+        let outside = root.path().join("outside.rs");
+        std::fs::write(&outside, "fn main() { foo(1); }\n").unwrap();
+        let out = ast_edit(
+            &work,
+            AstEditArgs {
+                pattern: "foo($A)".into(),
+                rewrite: "bar($A)".into(),
+                paths: vec!["../*.rs".into(), "../**".into()],
+            },
+        )
+        .await
+        .unwrap()
+        .content;
+        assert_eq!(
+            std::fs::read_to_string(&outside).unwrap(),
+            "fn main() { foo(1); }\n",
+            "outside file untouched"
+        );
+        assert!(out.contains("no edits"), "summary: {out}");
+    }
 }

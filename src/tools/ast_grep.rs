@@ -106,4 +106,32 @@ mod tests {
         .content;
         assert!(out.contains("no matches"), "expected no matches: {out}");
     }
+
+    #[tokio::test]
+    async fn confined_to_workdir_no_escape() {
+        // Escaping globs must never match files above the workdir.
+        let root = TempDir::new().unwrap();
+        let work = root.path().join("work");
+        std::fs::create_dir(&work).unwrap();
+        std::fs::write(
+            root.path().join("outside.rs"),
+            "fn main() { println!(\"x\"); }\n",
+        )
+        .unwrap();
+        let out = ast_grep(
+            &work,
+            AstGrepArgs {
+                pattern: "println!($$$A)".into(),
+                paths: vec!["../*.rs".into(), "../**".into()],
+                lang: Some("rust".into()),
+            },
+        )
+        .await
+        .unwrap()
+        .content;
+        assert!(
+            out.contains("no matches"),
+            "must not reach outside file: {out}"
+        );
+    }
 }
