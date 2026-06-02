@@ -122,6 +122,16 @@ async fn team_fixture_003_runs_live() {
         eprintln!("skipping team_fixture_003_runs_live: gantry binary not built");
         return;
     };
+    // Opt-in: this hits a real model and is inherently non-deterministic (a
+    // transient API error makes the team run exit Error). The API key is often
+    // ambiently present (mise loads .envrc), so a key check alone would let it
+    // flake the default gate. Run it deliberately with GANTRY_LIVE_EVAL=1.
+    if std::env::var("GANTRY_LIVE_EVAL").as_deref() != Ok("1") {
+        eprintln!(
+            "skipping team_fixture_003_runs_live: set GANTRY_LIVE_EVAL=1 to run the live team eval"
+        );
+        return;
+    }
     if std::env::var("ANTHROPIC_API_KEY").is_err() {
         eprintln!("skipping team_fixture_003_runs_live: ANTHROPIC_API_KEY not set");
         return;
