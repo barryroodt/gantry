@@ -1,0 +1,27 @@
+# Iterate-and-mutate profile (illustrative example, SP6).
+#
+# The "assess -> improve, repeat" archetype — e.g. skill or code refinement.
+# It exists to DEMONSTRATE how gantry's binary-first knobs compose; it is not a
+# consumer adapter. Real consumers supply their own persona (`system`), skills
+# (`--inject-skill`), and parse the NDJSON event stream in their own code.
+#
+# Composes:
+#   - loop mode (SP3): bounded iterations, each a fresh pass seeded with a
+#     compact carry-forward summary; the agent ends early via `decide_stop`.
+#   - mutation tools + COW isolation (SP2): write_file / edit_file land in an
+#     overlay; the original workdir is untouched and a terminal `changes` event
+#     lists what changed.
+#   - output compression (SP5): verbose tool output is capped/deduped en route
+#     to the model (automatic; no knob).
+mode = "loop"
+system = "system.md"
+tools = [
+    "read_file",
+    "list_files",
+    "find_files",
+    "ast_grep",
+    "write_file",
+    "edit_file",
+]
+isolate = true
+max_iterations = 5

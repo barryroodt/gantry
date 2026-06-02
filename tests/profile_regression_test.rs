@@ -80,3 +80,25 @@ fn review_profile_carries_compose_and_unify_prompts() {
     assert!(unify.contains("verdict"), "unify lost the verdict field");
     assert!(unify.contains("findings"), "unify lost the findings field");
 }
+
+fn refine_profile_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("profiles/refine")
+}
+
+#[test]
+fn refine_profile_composes_loop_mutation_isolation() {
+    // The shipped iterate-and-mutate example must compose the SP2/SP3 knobs so
+    // `--profile profiles/refine` is a working template (SP6 / ADR-0010).
+    let p = load_profile(&refine_profile_dir()).expect("load refine profile");
+    assert_eq!(p.mode, Some(Mode::Loop), "loop mode (SP3)");
+    assert!(p.isolate, "isolation enabled (SP2)");
+    assert_eq!(p.max_iterations, Some(5), "iteration cap (SP3)");
+    for t in ["read_file", "write_file", "edit_file"] {
+        assert!(
+            p.tools.iter().any(|x| x == t),
+            "{t} missing from refine tools: {:?}",
+            p.tools
+        );
+    }
+    assert!(p.system_prompt.is_some(), "refine profile has a persona");
+}
