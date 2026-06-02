@@ -1,5 +1,6 @@
 pub mod ast_edit;
 pub mod ast_grep;
+pub mod edit_file;
 pub mod find_files;
 pub mod git_diff;
 pub mod list_files;
@@ -56,8 +57,9 @@ pub fn resolve_workdir_path(
 
 /// Resolve a possibly-not-yet-existing path for create/write, confining it to
 /// `workdir`. Lexically resolves `.`/`..` (no filesystem access) and rejects any
-/// result outside `workdir`, then canonicalizes the deepest existing ancestor to
-/// defeat a symlinked parent that would redirect writes outside the jail.
+/// escape, then resolves symlinks on the real target location — the target itself
+/// when it exists (catching a symlinked/broken-symlink leaf), else its nearest
+/// existing ancestor (catching a symlinked parent) — to keep writes inside the jail.
 pub fn resolve_workdir_path_for_create(workdir: &Path, rel: &str) -> Result<PathBuf, ToolError> {
     let base = workdir.canonicalize().map_err(ToolError::Io)?;
     // An absolute `rel` makes `join` discard `base`; the containment check rejects it.
@@ -77,17 +79,27 @@ pub fn resolve_workdir_path_for_create(workdir: &Path, rel: &str) -> Result<Path
     if !normalized.starts_with(&base) {
         return Err(ToolError::OutsideWorkdir(rel.to_string()));
     }
-    // Symlink safety: the deepest existing ancestor must canonicalize under `base`.
-    let mut probe = normalized.parent();
-    while let Some(dir) = probe {
-        if dir.exists() {
-            let canon = dir.canonicalize().map_err(ToolError::Io)?;
-            if !canon.starts_with(&base) {
-                return Err(ToolError::OutsideWorkdir(rel.to_string()));
-            }
-            break;
+    // Symlink safety: the real location bytes will land in must stay under `base`.
+    if normalized.symlink_metadata().is_ok() {
+        // Target exists (file or symlink): canonicalize the full path so a
+        // symlinked target is resolved; a broken symlink fails here and is rejected.
+        let canon = normalized.canonicalize().map_err(ToolError::Io)?;
+        if !canon.starts_with(&base) {
+            return Err(ToolError::OutsideWorkdir(rel.to_string()));
         }
-        probe = dir.parent();
+    } else {
+        // Target absent: the nearest existing ancestor must canonicalize under `base`.
+        let mut probe = normalized.parent();
+        while let Some(dir) = probe {
+            if dir.exists() {
+                let canon = dir.canonicalize().map_err(ToolError::Io)?;
+                if !canon.starts_with(&base) {
+                    return Err(ToolError::OutsideWorkdir(rel.to_string()));
+                }
+                break;
+            }
+            probe = dir.parent();
+        }
     }
     Ok(normalized)
 }
@@ -132,6 +144,21 @@ mod tests {
         std::os::unix::fs::symlink(outside.path(), work.path().join("link")).unwrap();
         assert!(matches!(
             resolve_workdir_path_for_create(work.path(), "link/evil.txt"),
+            Err(ToolError::OutsideWorkdir(_))
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn create_guard_rejects_symlinked_target_leaf() {
+        // A leaf symlink pointing outside must be rejected (writes follow it).
+        let work = TempDir::new().unwrap();
+        let outside = TempDir::new().unwrap();
+        let secret = outside.path().join("secret.txt");
+        std::fs::write(&secret, "secret").unwrap();
+        std::os::unix::fs::symlink(&secret, work.path().join("evil")).unwrap();
+        assert!(matches!(
+            resolve_workdir_path_for_create(work.path(), "evil"),
             Err(ToolError::OutsideWorkdir(_))
         ));
     }
