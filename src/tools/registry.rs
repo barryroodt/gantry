@@ -39,6 +39,7 @@ pub struct ToolRegistry {
     workdir: PathBuf,
     allow: Vec<String>,
     shell_allow: Vec<String>,
+    control: Vec<String>,
 }
 
 impl ToolRegistry {
@@ -50,6 +51,7 @@ impl ToolRegistry {
                 .iter()
                 .map(|s| (*s).to_string())
                 .collect(),
+            control: Vec::new(),
         }
     }
 
@@ -60,6 +62,16 @@ impl ToolRegistry {
         if !allow.is_empty() {
             self.shell_allow = allow;
         }
+        self
+    }
+
+    /// Grant a control tool (e.g. `decide_stop`) for this registry only. Control
+    /// tools are always allowed here and surfaced in `schemas()`, independent of
+    /// the `--tool`/profile allowlist — so loop mode can add `decide_stop` without
+    /// collapsing the default "empty allow = all base tools" semantics.
+    #[must_use]
+    pub fn with_control(mut self, name: &str) -> Self {
+        self.control.push(name.to_string());
         self
     }
 
@@ -140,24 +152,34 @@ impl ToolRegistry {
         }]
     }
 
+    /// Every tool schema (base ++ opt-in ++ control), unfiltered.
+    fn all_schemas() -> Vec<ToolSchema> {
+        let mut all = Self::base_schemas();
+        all.extend(Self::optin_schemas());
+        all.extend(Self::control_schemas());
+        all
+    }
+
+    /// Single source of truth for tool visibility, shared by `schemas` and
+    /// `dispatch`: base tools are on by default (or when named); opt-in/control
+    /// tools require an explicit grant; control tools may also be granted
+    /// out-of-band via `with_control`.
+    fn is_allowed(&self, name: &str) -> bool {
+        if self.control.iter().any(|t| t == name) {
+            return true;
+        }
+        let explicit_only = OPTIN_TOOL_NAMES.contains(&name) || CONTROL_TOOL_NAMES.contains(&name);
+        if explicit_only {
+            self.allow.iter().any(|t| t == name)
+        } else {
+            self.allow.is_empty() || self.allow.iter().any(|t| t == name)
+        }
+    }
+
     /// JSON schemas to send to the provider as available tools.
     pub fn schemas(&self) -> Vec<ToolSchema> {
-        let mut schemas = Self::base_schemas();
-        if !self.allow.is_empty() {
-            schemas.retain(|s| self.allow.iter().any(|t| t == &s.name));
-        }
-        // Opt-in tools appear only when the allowlist names them explicitly.
-        for opt in Self::optin_schemas() {
-            if self.allow.iter().any(|t| t == &opt.name) {
-                schemas.push(opt);
-            }
-        }
-        // Control tools (e.g. decide_stop) appear only when granted explicitly.
-        for ctrl in Self::control_schemas() {
-            if self.allow.iter().any(|t| t == &ctrl.name) {
-                schemas.push(ctrl);
-            }
-        }
+        let mut schemas = Self::all_schemas();
+        schemas.retain(|s| self.is_allowed(&s.name));
         schemas
     }
 
@@ -209,12 +231,7 @@ impl ToolRegistry {
     }
 
     async fn dispatch_inner(&self, name: &str, args_json: &str) -> Result<ToolOutput, ToolError> {
-        let explicit_only = OPTIN_TOOL_NAMES.contains(&name) || CONTROL_TOOL_NAMES.contains(&name);
-        let allowed = if explicit_only {
-            self.allow.iter().any(|t| t == name)
-        } else {
-            self.allow.is_empty() || self.allow.iter().any(|t| t == name)
-        };
+        let allowed = self.is_allowed(name);
         if !allowed {
             return Err(ToolError::UnknownTool(name.to_string()));
         }
