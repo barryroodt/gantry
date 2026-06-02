@@ -1,7 +1,7 @@
 //! write_file tool: create or overwrite a workdir-confined file. MUTATING.
 //! Registered default-OUT of the allowlist by the orchestrator (registry wiring).
 
-use super::{resolve_workdir_path_for_create, truncate::truncated_output, ToolError, ToolOutput};
+use super::{resolve_workdir_path, truncate::truncated_output, ToolError, ToolOutput};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
@@ -19,7 +19,7 @@ pub async fn write_file(workdir: &Path, args: WriteFileArgs) -> Result<ToolOutpu
     if args.path.trim().is_empty() {
         return Err(ToolError::InvalidInput("empty path".into()));
     }
-    let target = resolve_workdir_path_for_create(workdir, &args.path)?;
+    let target = resolve_workdir_path(workdir, &args.path)?;
     if let Some(parent) = target.parent() {
         tokio::fs::create_dir_all(parent).await?;
     }

@@ -41,28 +41,13 @@ pub enum ToolError {
     UnknownTool(String),
 }
 
-/// Resolve a relative path against `workdir`, rejecting symlink-traversal escapes.
-pub fn resolve_workdir_path(
-    workdir: &std::path::Path,
-    rel: &str,
-) -> Result<std::path::PathBuf, ToolError> {
-    let workdir = workdir.canonicalize().map_err(ToolError::Io)?;
-    let joined = workdir.join(rel);
-    let canonical = joined
-        .canonicalize()
-        .map_err(|_| ToolError::OutsideWorkdir(rel.to_string()))?;
-    if !canonical.starts_with(&workdir) {
-        return Err(ToolError::OutsideWorkdir(rel.to_string()));
-    }
-    Ok(canonical)
-}
-
-/// Resolve a possibly-not-yet-existing path for create/write, confining it to
-/// `workdir`. Lexically resolves `.`/`..` (no filesystem access) and rejects any
-/// escape, then resolves symlinks on the real target location — the target itself
-/// when it exists (catching a symlinked/broken-symlink leaf), else its nearest
-/// existing ancestor (catching a symlinked parent) — to keep writes inside the jail.
-pub fn resolve_workdir_path_for_create(workdir: &Path, rel: &str) -> Result<PathBuf, ToolError> {
+/// Resolve `rel` against `workdir`, confining the result to `workdir` whether or
+/// not the target exists yet — so it serves reads, writes, and creates alike.
+/// Lexically resolves `.`/`..` with no filesystem access and rejects any escape,
+/// then resolves symlinks on the real target location — the target itself when it
+/// exists (catching a symlinked/broken-symlink leaf), else its nearest existing
+/// ancestor (catching a symlinked parent) — to keep the path inside the jail.
+pub fn resolve_workdir_path(workdir: &Path, rel: &str) -> Result<PathBuf, ToolError> {
     let base = workdir.canonicalize().map_err(ToolError::Io)?;
     // An absolute `rel` makes `join` discard `base`; the containment check rejects it.
     let joined = base.join(rel);
@@ -115,7 +100,7 @@ mod tests {
     fn create_guard_allows_nested_new_path() {
         let dir = TempDir::new().unwrap();
         let base = dir.path().canonicalize().unwrap();
-        let p = resolve_workdir_path_for_create(dir.path(), "a/b/c.txt").unwrap();
+        let p = resolve_workdir_path(dir.path(), "a/b/c.txt").unwrap();
         assert!(p.starts_with(&base));
         assert!(p.ends_with("a/b/c.txt"));
     }
@@ -124,7 +109,7 @@ mod tests {
     fn create_guard_rejects_parent_escape() {
         let dir = TempDir::new().unwrap();
         assert!(matches!(
-            resolve_workdir_path_for_create(dir.path(), "../escape.txt"),
+            resolve_workdir_path(dir.path(), "../escape.txt"),
             Err(ToolError::OutsideWorkdir(_))
         ));
     }
@@ -133,7 +118,7 @@ mod tests {
     fn create_guard_rejects_absolute_outside() {
         let dir = TempDir::new().unwrap();
         assert!(matches!(
-            resolve_workdir_path_for_create(dir.path(), "/etc/passwd"),
+            resolve_workdir_path(dir.path(), "/etc/passwd"),
             Err(ToolError::OutsideWorkdir(_))
         ));
     }
@@ -145,7 +130,7 @@ mod tests {
         let outside = TempDir::new().unwrap();
         std::os::unix::fs::symlink(outside.path(), work.path().join("link")).unwrap();
         assert!(matches!(
-            resolve_workdir_path_for_create(work.path(), "link/evil.txt"),
+            resolve_workdir_path(work.path(), "link/evil.txt"),
             Err(ToolError::OutsideWorkdir(_))
         ));
     }
@@ -160,7 +145,7 @@ mod tests {
         std::fs::write(&secret, "secret").unwrap();
         std::os::unix::fs::symlink(&secret, work.path().join("evil")).unwrap();
         assert!(matches!(
-            resolve_workdir_path_for_create(work.path(), "evil"),
+            resolve_workdir_path(work.path(), "evil"),
             Err(ToolError::OutsideWorkdir(_))
         ));
     }

@@ -1,7 +1,7 @@
 //! edit_file tool: literal, occurrence-count-guarded search/replace on a
 //! workdir-confined file. MUTATING. Registered default-OUT of the allowlist.
 
-use super::{resolve_workdir_path_for_create, truncate::truncated_output, ToolError, ToolOutput};
+use super::{resolve_workdir_path, truncate::truncated_output, ToolError, ToolOutput};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
@@ -26,7 +26,7 @@ pub async fn edit_file(workdir: &Path, args: EditFileArgs) -> Result<ToolOutput,
     if args.search.is_empty() {
         return Err(ToolError::InvalidInput("empty search".into()));
     }
-    let target = resolve_workdir_path_for_create(workdir, &args.path)?;
+    let target = resolve_workdir_path(workdir, &args.path)?;
     let content = tokio::fs::read_to_string(&target).await?;
     let count = content.matches(args.search.as_str()).count();
     let want = args.expected_count.unwrap_or(1) as usize;
