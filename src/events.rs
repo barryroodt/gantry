@@ -97,6 +97,7 @@ pub enum GantryEvent {
         turn: u32,
         tool: String,
         bytes: u64,
+        bytes_out: u64,
         truncated: bool,
         #[serde(skip_serializing_if = "Option::is_none")]
         error: Option<String>,

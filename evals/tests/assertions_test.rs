@@ -241,6 +241,7 @@ fn assert_tool_call_pairing_pass_and_fail() {
             turn: 1,
             tool: "read_file".into(),
             bytes: 10,
+            bytes_out: 10,
             truncated: false,
             error: None,
         },

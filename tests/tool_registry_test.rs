@@ -348,3 +348,43 @@ async fn decide_stop_dispatch_gated_then_allowed() {
         out.content
     );
 }
+
+#[tokio::test]
+async fn dispatch_compresses_verbose_output_and_reports_bytes_out() {
+    let dir = TempDir::new().unwrap();
+    let big = (1..=600)
+        .map(|i| format!("line{i}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    std::fs::write(dir.path().join("big.txt"), &big).unwrap();
+
+    let guard = TestEmitterGuard::install();
+    let registry = ToolRegistry::new(dir.path().to_path_buf(), vec![]);
+    let out = registry
+        .dispatch("reviewer", 1, "read_file", r#"{"path":"big.txt"}"#)
+        .await;
+
+    // dispatch applied the recoverable head+tail cap.
+    assert!(
+        out.content.contains("lines omitted"),
+        "verbose output should be capped: {}",
+        out.content
+    );
+    assert!(
+        (out.content.len() as u64) < (out.bytes as u64),
+        "compressed content ({}) should be below raw ({})",
+        out.content.len(),
+        out.bytes
+    );
+
+    // tool_result reports raw `bytes` plus the smaller emitted `bytes_out`.
+    let events = guard.drain_events();
+    let GantryEvent::ToolResult {
+        bytes, bytes_out, ..
+    } = &events[1]
+    else {
+        panic!("expected tool_result at index 1, got {:?}", events[1]);
+    };
+    assert!(*bytes_out < *bytes, "bytes_out {bytes_out} < bytes {bytes}");
+    assert_eq!(*bytes_out, out.content.len() as u64);
+}

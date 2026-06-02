@@ -191,12 +191,16 @@ impl ToolRegistry {
             }
         };
 
+        // SP5: structured, recoverable compression at the tool-result boundary.
+        let output = super::compress::compress(name, output);
+
         let _ = GantryEvent::ToolResult {
             ts: now_ms(),
             role: role.into(),
             turn,
             tool: name.into(),
             bytes: output.bytes as u64,
+            bytes_out: output.content.len() as u64,
             truncated: output.truncated,
             error,
         }

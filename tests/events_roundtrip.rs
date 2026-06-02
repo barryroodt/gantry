@@ -58,6 +58,7 @@ fn tool_result_roundtrip() {
         turn: 2,
         tool: "read".into(),
         bytes: 512,
+        bytes_out: 256,
         truncated: false,
         error: None,
     });
@@ -67,6 +68,7 @@ fn tool_result_roundtrip() {
         turn: 3,
         tool: "shell".into(),
         bytes: 0,
+        bytes_out: 0,
         truncated: false,
         error: Some("command failed".into()),
     });
