@@ -1,5 +1,5 @@
 use crate::cli::Validated;
-use crate::events::{now_ms, ExitCode, GantryEvent};
+use crate::events::{now_ms, ErrorKind, ExitCode, GantryEvent};
 use crate::meter::TokenMeter;
 use crate::mode::ModeRunOutcome;
 use crate::provider::{build_adapter, ChatMessage, ProviderAdapter, ToolResult};
@@ -22,7 +22,6 @@ impl SingleMode {
     /// Run the single-mode loop. Always emits a terminal `result` event.
     /// Returns the ExitCode to translate to process exit.
     pub async fn run(self) -> ExitCode {
-        // Skills are pre-injected into the system prompt.
         let system_prefix = self
             .skill_loader
             .inject_core_skills(&self.validated.inject_skills);
@@ -32,103 +31,168 @@ impl SingleMode {
             .as_deref()
             .unwrap_or(crate::mode::DEFAULT_SYSTEM_PROMPT);
         let system = format!("{system_prefix}\n{body}");
+        let pass = run_agent_pass(
+            self.provider.as_ref(),
+            &self.registry,
+            &self.meter,
+            &self.cancel,
+            &system,
+            vec![ChatMessage::User(self.prompt.clone())],
+            "single",
+            MAX_TURNS,
+        )
+        .await;
+        pass.exit.unwrap_or(ExitCode::Ok)
+    }
+}
 
-        let tools = self.registry.schemas();
-        let mut messages: Vec<ChatMessage> = vec![ChatMessage::User(self.prompt.clone())];
-        let mut turn: u32 = 0;
-        const MAX_TURNS: u32 = 20;
+/// Per-pass turn cap shared by single mode and the loop mode's per-iteration pass.
+pub const MAX_TURNS: u32 = 20;
 
-        loop {
-            if self.cancel.is_cancelled() {
-                return if self.meter.tripped() {
-                    ExitCode::Budget
-                } else {
-                    ExitCode::Timeout
+/// Outcome of one agent pass. `exit = Some(..)` means the pass hit a terminal
+/// condition (budget/timeout/provider error); `None` means it ended normally
+/// (the model stopped calling tools, or the turn cap was reached).
+pub struct PassResult {
+    pub final_text: String,
+    pub stop_requested: bool,
+    pub exit: Option<ExitCode>,
+}
+
+/// Run one bounded agent pass: repeated model calls + tool dispatch until the
+/// model stops calling tools, `max_turns` is hit, or budget/cancel fires. Emits
+/// the per-turn `agent_turn` / `assistant_text` / tool events. `stop_requested`
+/// is set when the model calls the `decide_stop` control tool.
+#[allow(clippy::too_many_arguments)]
+pub async fn run_agent_pass(
+    provider: &dyn ProviderAdapter,
+    registry: &ToolRegistry,
+    meter: &TokenMeter,
+    cancel: &CancellationToken,
+    system: &str,
+    initial_messages: Vec<ChatMessage>,
+    role: &str,
+    max_turns: u32,
+) -> PassResult {
+    let tools = registry.schemas();
+    let mut messages = initial_messages;
+    let mut turn: u32 = 0;
+    let mut final_text = String::new();
+    let mut stop_requested = false;
+
+    loop {
+        if cancel.is_cancelled() {
+            let exit = if meter.tripped() {
+                ExitCode::Budget
+            } else {
+                ExitCode::Timeout
+            };
+            return PassResult {
+                final_text,
+                stop_requested,
+                exit: Some(exit),
+            };
+        }
+        if turn >= max_turns {
+            break;
+        }
+
+        let resp_fut = provider.complete(system, &messages, &tools);
+        let resp = tokio::select! {
+            r = resp_fut => r,
+            _ = cancel.cancelled() => {
+                let exit = if meter.tripped() { ExitCode::Budget } else { ExitCode::Timeout };
+                return PassResult { final_text, stop_requested, exit: Some(exit) };
+            }
+        };
+        let resp = match resp {
+            Ok(r) => r,
+            Err(err) => {
+                let _ = GantryEvent::Error {
+                    ts: now_ms(),
+                    kind: ErrorKind::Provider,
+                    message: err.to_string(),
+                }
+                .emit();
+                return PassResult {
+                    final_text,
+                    stop_requested,
+                    exit: Some(ExitCode::Error),
                 };
             }
-            if turn >= MAX_TURNS {
-                break;
-            }
+        };
 
-            let resp_fut = self.provider.complete(&system, &messages, &tools);
-            let resp = tokio::select! {
-                r = resp_fut => r,
-                _ = self.cancel.cancelled() => {
-                    return if self.meter.tripped() { ExitCode::Budget } else { ExitCode::Timeout };
-                }
-            };
-            let resp = match resp {
-                Ok(r) => r,
-                Err(err) => {
-                    let _ = GantryEvent::Error {
-                        ts: now_ms(),
-                        kind: crate::events::ErrorKind::Provider,
-                        message: err.to_string(),
-                    }
-                    .emit();
-                    return ExitCode::Error;
-                }
-            };
-
-            // Meter check
-            if let Err(_be) = self.meter.add(
+        if meter
+            .add(
                 resp.input_tokens,
                 resp.output_tokens,
                 resp.cache_read,
                 resp.cache_write,
-            ) {
-                return ExitCode::Budget;
-            }
-
-            let _ = GantryEvent::AgentTurn {
-                ts: now_ms(),
-                role: "single".into(),
-                turn,
-                input_tokens: resp.input_tokens,
-                output_tokens: resp.output_tokens,
-                cache_read: resp.cache_read,
-                cache_write: resp.cache_write,
-            }
-            .emit();
-
-            if !resp.text.is_empty() {
-                let _ = GantryEvent::AssistantText {
-                    ts: now_ms(),
-                    role: "single".into(),
-                    text: resp.text.clone(),
-                }
-                .emit();
-            }
-
-            if resp.tool_calls.is_empty() {
-                // No tool calls → loop done.
-                break;
-            }
-
-            // Dispatch tools in order.
-            let mut tool_results = Vec::with_capacity(resp.tool_calls.len());
-            for call in &resp.tool_calls {
-                let out = self
-                    .registry
-                    .dispatch("single", turn, &call.name, &call.args_json)
-                    .await;
-                tool_results.push(ToolResult {
-                    id: call.id.clone(),
-                    content: out.content,
-                    is_error: false,
-                });
-            }
-
-            // Append assistant message + tool results to conversation.
-            messages.push(ChatMessage::Assistant {
-                text: resp.text,
-                tool_calls: resp.tool_calls,
-            });
-            messages.push(ChatMessage::ToolResults(tool_results));
-            turn += 1;
+            )
+            .is_err()
+        {
+            return PassResult {
+                final_text,
+                stop_requested,
+                exit: Some(ExitCode::Budget),
+            };
         }
 
-        ExitCode::Ok
+        let _ = GantryEvent::AgentTurn {
+            ts: now_ms(),
+            role: role.into(),
+            turn,
+            input_tokens: resp.input_tokens,
+            output_tokens: resp.output_tokens,
+            cache_read: resp.cache_read,
+            cache_write: resp.cache_write,
+        }
+        .emit();
+
+        if !resp.text.is_empty() {
+            final_text = resp.text.clone();
+            let _ = GantryEvent::AssistantText {
+                ts: now_ms(),
+                role: role.into(),
+                text: resp.text.clone(),
+            }
+            .emit();
+        }
+
+        if resp.tool_calls.is_empty() {
+            break;
+        }
+        if resp
+            .tool_calls
+            .iter()
+            .any(|c| c.name == crate::tools::decide_stop::DECIDE_STOP)
+        {
+            stop_requested = true;
+        }
+
+        let mut tool_results = Vec::with_capacity(resp.tool_calls.len());
+        for call in &resp.tool_calls {
+            let out = registry
+                .dispatch(role, turn, &call.name, &call.args_json)
+                .await;
+            tool_results.push(ToolResult {
+                id: call.id.clone(),
+                content: out.content,
+                is_error: false,
+            });
+        }
+
+        messages.push(ChatMessage::Assistant {
+            text: resp.text,
+            tool_calls: resp.tool_calls,
+        });
+        messages.push(ChatMessage::ToolResults(tool_results));
+        turn += 1;
+    }
+
+    PassResult {
+        final_text,
+        stop_requested,
+        exit: None,
     }
 }
 
