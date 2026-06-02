@@ -4,6 +4,7 @@ use crate::meter::MeterSnapshot;
 
 pub mod agent_loop;
 pub mod isolation;
+pub mod loop_mode;
 pub mod single;
 pub mod team;
 
@@ -39,5 +40,6 @@ pub(crate) async fn dispatch(v: Validated) -> ModeRunOutcome {
     match v.mode {
         Mode::Single => single::run_single(v).await,
         Mode::Team => team::run_team(v).await,
+        Mode::Loop => loop_mode::run_loop(v).await,
     }
 }

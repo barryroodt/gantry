@@ -73,6 +73,7 @@ pub struct Cli {
 pub enum Mode {
     Single,
     Team,
+    Loop,
 }
 
 impl Mode {
@@ -80,6 +81,7 @@ impl Mode {
         match self {
             Self::Single => "single",
             Self::Team => "team",
+            Self::Loop => "loop",
         }
     }
 }
