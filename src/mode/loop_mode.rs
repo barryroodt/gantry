@@ -6,77 +6,45 @@
 
 use crate::cli::Validated;
 use crate::events::{now_ms, ExitCode, GantryEvent};
-use crate::meter::TokenMeter;
-use crate::mode::single::{run_agent_pass, MAX_TURNS};
-use crate::mode::ModeRunOutcome;
-use crate::provider::{build_adapter, ChatMessage};
-use crate::skills::SkillLoader;
+use crate::mode::single::{run_agent_pass, PassCtx, MAX_TURNS};
+use crate::mode::{bootstrap, outcome, ModeRunOutcome, RunBootstrap};
+use crate::provider::ChatMessage;
 use crate::tools::decide_stop::DECIDE_STOP;
-use crate::tools::registry::BASE_TOOL_NAMES;
 use crate::tools::ToolRegistry;
-use std::sync::Arc;
-
-fn outcome(exit: ExitCode, meter: &TokenMeter) -> ModeRunOutcome {
-    ModeRunOutcome {
-        exit,
-        meter: meter.snapshot(),
-    }
-}
 
 /// Public entry point used by `mode::dispatch`.
 pub async fn run_loop(validated: Validated) -> ModeRunOutcome {
-    use crate::cancel::{shared_token, spawn_signal_handler, spawn_timeout_watchdog};
-
-    let cancel = shared_token();
-    let meter = Arc::new(TokenMeter::new(validated.max_tokens, cancel.clone()));
-    let _watchdog = spawn_timeout_watchdog(cancel.clone(), validated.timeout_ms);
-    let _signal = spawn_signal_handler(cancel.clone());
-
-    let provider = match build_adapter(validated.provider.clone(), validated.model.clone()) {
-        Ok(p) => p,
-        Err(err) => {
-            let _ = GantryEvent::Error {
-                ts: now_ms(),
-                kind: crate::events::ErrorKind::Config,
-                message: err.to_string(),
-            }
-            .emit();
-            return outcome(ExitCode::Config, &meter);
-        }
+    let RunBootstrap {
+        cancel,
+        meter,
+        provider,
+        prompt,
+        skill_loader,
+        watchdog: _watchdog,
+        signal: _signal,
+    } = match bootstrap(&validated) {
+        Ok(b) => b,
+        Err(o) => return o,
     };
 
-    let prompt = match std::fs::read_to_string(&validated.prompt_file) {
-        Ok(p) => p,
-        Err(err) => {
-            let _ = GantryEvent::Error {
-                ts: now_ms(),
-                kind: crate::events::ErrorKind::Config,
-                message: format!("prompt file: {err}"),
-            }
-            .emit();
-            return outcome(ExitCode::Config, &meter);
-        }
-    };
+    // decide_stop is granted as a control tool, so the --tool/profile allowlist
+    // keeps its normal "empty = all base tools" semantics.
+    let registry = ToolRegistry::new(validated.workdir.clone(), validated.tools.clone())
+        .with_shell_allow(validated.shell_allow.clone())
+        .with_control(DECIDE_STOP);
 
-    // Loop tools = the configured set (or all base tools by default) PLUS the
-    // decide_stop control signal. We can't lean on the empty-allow "all base"
-    // shortcut because decide_stop has to be named explicitly.
-    let mut allow: Vec<String> = if validated.tools.is_empty() {
-        BASE_TOOL_NAMES.iter().map(|s| s.to_string()).collect()
-    } else {
-        validated.tools.clone()
-    };
-    allow.push(DECIDE_STOP.to_string());
-    let registry = ToolRegistry::new(validated.workdir.clone(), allow)
-        .with_shell_allow(validated.shell_allow.clone());
-
-    let skill_loader = SkillLoader::new(validated.workdir.clone());
     let system_prefix = skill_loader.inject_core_skills(&validated.inject_skills);
     let body = validated
         .system_prompt
         .as_deref()
         .unwrap_or(crate::mode::DEFAULT_SYSTEM_PROMPT);
     let system = format!("{system_prefix}\n{body}");
+    let ctx = PassCtx {
+        provider: provider.as_ref(),
+        registry: &registry,
+        meter: &meter,
+        cancel: &cancel,
+    };
 
     let mut prior_final = String::new();
     let mut exit = ExitCode::Ok;
@@ -103,17 +71,7 @@ pub async fn run_loop(validated: Validated) -> ModeRunOutcome {
             ))]
         };
 
-        let pass = run_agent_pass(
-            provider.as_ref(),
-            &registry,
-            &meter,
-            &cancel,
-            &system,
-            messages,
-            "loop",
-            MAX_TURNS,
-        )
-        .await;
+        let pass = run_agent_pass(&ctx, &system, messages, "loop", MAX_TURNS).await;
         prior_final = pass.final_text;
 
         let stopped =

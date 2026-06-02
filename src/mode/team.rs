@@ -2,8 +2,8 @@ use crate::cli::Validated;
 use crate::events::{now_ms, ErrorKind, ExitCode, GantryEvent};
 use crate::meter::TokenMeter;
 use crate::mode::agent_loop::LoopDriver;
-use crate::mode::ModeRunOutcome;
-use crate::provider::{build_adapter, ChatMessage, ProviderAdapter, ToolSchema};
+use crate::mode::{bootstrap, outcome, ModeRunOutcome, RunBootstrap};
+use crate::provider::{ChatMessage, ProviderAdapter, ToolSchema};
 use crate::skills::SkillLoader;
 use crate::tools::subagent::{
     BroadcastSummaryArgs, CollectOutputsArgs, SpawnSubagentArgs, SubagentRoster,
@@ -357,56 +357,26 @@ fn digest_of(collect_output: &str) -> String {
     out
 }
 
-fn outcome(exit: ExitCode, meter: &TokenMeter) -> ModeRunOutcome {
-    ModeRunOutcome {
-        exit,
-        meter: meter.snapshot(),
-    }
-}
-
 /// Public entry point used by main.rs.
 pub async fn run_team(validated: Validated) -> ModeRunOutcome {
-    use crate::cancel::shared_token;
-    use crate::cancel::spawn_timeout_watchdog;
-
-    let cancel = shared_token();
-    let meter = Arc::new(TokenMeter::new(validated.max_tokens, cancel.clone()));
-    let _watchdog = spawn_timeout_watchdog(cancel.clone(), validated.timeout_ms);
-    let _signal = crate::cancel::spawn_signal_handler(cancel.clone());
-
-    let provider: Arc<dyn ProviderAdapter> =
-        match build_adapter(validated.provider.clone(), validated.model.clone()) {
-            Ok(p) => Arc::from(p),
-            Err(err) => {
-                let _ = GantryEvent::Error {
-                    ts: now_ms(),
-                    kind: ErrorKind::Config,
-                    message: err.to_string(),
-                }
-                .emit();
-                return outcome(ExitCode::Config, &meter);
-            }
-        };
-
-    let prompt = match std::fs::read_to_string(&validated.prompt_file) {
-        Ok(p) => p,
-        Err(err) => {
-            let _ = GantryEvent::Error {
-                ts: now_ms(),
-                kind: ErrorKind::Config,
-                message: format!("prompt file: {err}"),
-            }
-            .emit();
-            return outcome(ExitCode::Config, &meter);
-        }
+    let RunBootstrap {
+        cancel,
+        meter,
+        provider,
+        prompt,
+        skill_loader,
+        watchdog: _watchdog,
+        signal: _signal,
+    } = match bootstrap(&validated) {
+        Ok(b) => b,
+        Err(o) => return o,
     };
-
+    let provider: Arc<dyn ProviderAdapter> = Arc::from(provider);
     let roster = Arc::new(SubagentRoster::new());
     let registry = Arc::new(
         ToolRegistry::new(validated.workdir.clone(), validated.tools.clone())
             .with_shell_allow(validated.shell_allow.clone()),
     );
-    let skill_loader = SkillLoader::new(validated.workdir.clone());
 
     let exit = TeamMode {
         validated,

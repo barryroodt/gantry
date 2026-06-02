@@ -1,8 +1,8 @@
+use super::{bootstrap, outcome, ModeRunOutcome, RunBootstrap};
 use crate::cli::Validated;
 use crate::events::{now_ms, ErrorKind, ExitCode, GantryEvent};
 use crate::meter::TokenMeter;
-use crate::mode::ModeRunOutcome;
-use crate::provider::{build_adapter, ChatMessage, ProviderAdapter, ToolResult};
+use crate::provider::{ChatMessage, ProviderAdapter, ToolResult};
 use crate::skills::SkillLoader;
 use crate::tools::ToolRegistry;
 use std::sync::Arc;
@@ -31,11 +31,14 @@ impl SingleMode {
             .as_deref()
             .unwrap_or(crate::mode::DEFAULT_SYSTEM_PROMPT);
         let system = format!("{system_prefix}\n{body}");
+        let ctx = PassCtx {
+            provider: self.provider.as_ref(),
+            registry: &self.registry,
+            meter: &self.meter,
+            cancel: &self.cancel,
+        };
         let pass = run_agent_pass(
-            self.provider.as_ref(),
-            &self.registry,
-            &self.meter,
-            &self.cancel,
+            &ctx,
             &system,
             vec![ChatMessage::User(self.prompt.clone())],
             "single",
@@ -47,32 +50,45 @@ impl SingleMode {
 }
 
 /// Per-pass turn cap shared by single mode and the loop mode's per-iteration pass.
-pub const MAX_TURNS: u32 = 20;
+pub(crate) const MAX_TURNS: u32 = 20;
 
 /// Outcome of one agent pass. `exit = Some(..)` means the pass hit a terminal
 /// condition (budget/timeout/provider error); `None` means it ended normally
 /// (the model stopped calling tools, or the turn cap was reached).
-pub struct PassResult {
+pub(crate) struct PassResult {
     pub final_text: String,
     pub stop_requested: bool,
     pub exit: Option<ExitCode>,
+}
+
+/// The ambient per-run context an agent pass borrows: provider, tool registry,
+/// token meter, and cancellation token. Lets `run_agent_pass` take one context
+/// instead of four positional arguments.
+#[derive(Clone, Copy)]
+pub(crate) struct PassCtx<'a> {
+    pub provider: &'a dyn ProviderAdapter,
+    pub registry: &'a ToolRegistry,
+    pub meter: &'a TokenMeter,
+    pub cancel: &'a CancellationToken,
 }
 
 /// Run one bounded agent pass: repeated model calls + tool dispatch until the
 /// model stops calling tools, `max_turns` is hit, or budget/cancel fires. Emits
 /// the per-turn `agent_turn` / `assistant_text` / tool events. `stop_requested`
 /// is set when the model calls the `decide_stop` control tool.
-#[allow(clippy::too_many_arguments)]
-pub async fn run_agent_pass(
-    provider: &dyn ProviderAdapter,
-    registry: &ToolRegistry,
-    meter: &TokenMeter,
-    cancel: &CancellationToken,
+pub(crate) async fn run_agent_pass(
+    ctx: &PassCtx<'_>,
     system: &str,
     initial_messages: Vec<ChatMessage>,
     role: &str,
     max_turns: u32,
 ) -> PassResult {
+    let PassCtx {
+        provider,
+        registry,
+        meter,
+        cancel,
+    } = *ctx;
     let tools = registry.schemas();
     let mut messages = initial_messages;
     let mut turn: u32 = 0;
@@ -196,53 +212,22 @@ pub async fn run_agent_pass(
     }
 }
 
-fn outcome(exit: ExitCode, meter: &TokenMeter) -> ModeRunOutcome {
-    ModeRunOutcome {
-        exit,
-        meter: meter.snapshot(),
-    }
-}
-
 /// Public entry point used by main.rs.
 pub async fn run_single(validated: Validated) -> ModeRunOutcome {
-    use crate::cancel::shared_token;
-    use crate::cancel::spawn_timeout_watchdog;
-
-    let cancel = shared_token();
-    let meter = Arc::new(TokenMeter::new(validated.max_tokens, cancel.clone()));
-    let _watchdog = spawn_timeout_watchdog(cancel.clone(), validated.timeout_ms);
-    let _signal = crate::cancel::spawn_signal_handler(cancel.clone());
-
-    let provider = match build_adapter(validated.provider.clone(), validated.model.clone()) {
-        Ok(p) => p,
-        Err(err) => {
-            let _ = GantryEvent::Error {
-                ts: now_ms(),
-                kind: crate::events::ErrorKind::Config,
-                message: err.to_string(),
-            }
-            .emit();
-            return outcome(ExitCode::Config, &meter);
-        }
+    let RunBootstrap {
+        cancel,
+        meter,
+        provider,
+        prompt,
+        skill_loader,
+        watchdog: _watchdog,
+        signal: _signal,
+    } = match bootstrap(&validated) {
+        Ok(b) => b,
+        Err(o) => return o,
     };
-
-    let prompt = match std::fs::read_to_string(&validated.prompt_file) {
-        Ok(p) => p,
-        Err(err) => {
-            let _ = GantryEvent::Error {
-                ts: now_ms(),
-                kind: crate::events::ErrorKind::Config,
-                message: format!("prompt file: {err}"),
-            }
-            .emit();
-            return outcome(ExitCode::Config, &meter);
-        }
-    };
-
     let registry = ToolRegistry::new(validated.workdir.clone(), validated.tools.clone())
         .with_shell_allow(validated.shell_allow.clone());
-    let skill_loader = SkillLoader::new(validated.workdir.clone());
-
     let exit = SingleMode {
         validated,
         meter: meter.clone(),
@@ -254,6 +239,5 @@ pub async fn run_single(validated: Validated) -> ModeRunOutcome {
     }
     .run()
     .await;
-
     outcome(exit, &meter)
 }
