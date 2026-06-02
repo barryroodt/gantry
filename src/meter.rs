@@ -12,6 +12,7 @@ pub struct TokenMeter {
     cancel: CancellationToken,
 }
 
+#[derive(Debug, Clone, Default)]
 pub struct MeterSnapshot {
     pub total_input: u64,
     pub total_output: u64,

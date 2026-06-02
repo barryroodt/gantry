@@ -1,7 +1,9 @@
+use crate::cli::{Mode, Validated};
 use crate::events::ExitCode;
 use crate::meter::MeterSnapshot;
 
 pub mod agent_loop;
+pub mod isolation;
 pub mod single;
 pub mod team;
 
@@ -19,4 +21,23 @@ pub const DEFAULT_SUBAGENT_SYSTEM: &str =
 pub struct ModeRunOutcome {
     pub exit: ExitCode,
     pub meter: MeterSnapshot,
+}
+
+/// Entry point: run the selected mode, transparently wrapping it in copy-on-write
+/// workspace isolation when `--isolate` is set.
+pub async fn run(v: Validated) -> ModeRunOutcome {
+    if v.isolate {
+        isolation::run_isolated(v).await
+    } else {
+        dispatch(v).await
+    }
+}
+
+/// Dispatch to the concrete mode runner against `v.workdir` — which the isolation
+/// wrapper may have repointed at an overlay before calling.
+pub(crate) async fn dispatch(v: Validated) -> ModeRunOutcome {
+    match v.mode {
+        Mode::Single => single::run_single(v).await,
+        Mode::Team => team::run_team(v).await,
+    }
 }

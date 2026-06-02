@@ -53,6 +53,13 @@ pub struct Cli {
     /// flags override profile values.
     #[arg(long = "profile", value_name = "DIR")]
     pub profile: Option<PathBuf>,
+
+    /// Run the agent against a COW shadow of the workdir (pi-iso): mutations land
+    /// in an overlay, the original workdir is untouched, and a terminal `changes`
+    /// event lists what changed. Fail-closed — if no isolation backend is
+    /// available the run errors. Also enabled by a profile `isolate = true`.
+    #[arg(long)]
+    pub isolate: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, ValueEnum, Deserialize)]
@@ -164,6 +171,7 @@ pub struct Validated {
     pub unify_prompt: Option<String>,
     pub tools: Vec<String>,
     pub shell_allow: Vec<String>,
+    pub isolate: bool,
 }
 
 impl Cli {
@@ -259,6 +267,8 @@ impl Cli {
             .as_ref()
             .map(|p| p.shell_allow.clone())
             .unwrap_or_default();
+        // Isolation is opt-in and additive: enabled by the flag or the profile.
+        let isolate = self.isolate || profile.as_ref().map(|p| p.isolate).unwrap_or(false);
 
         Ok(Validated {
             mode,
@@ -275,6 +285,7 @@ impl Cli {
             unify_prompt,
             tools,
             shell_allow,
+            isolate,
         })
     }
 

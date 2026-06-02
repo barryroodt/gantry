@@ -53,6 +53,13 @@ impl ExitCode {
     }
 }
 
+/// One changed file captured at `--isolate` teardown; `path` is workdir-relative.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct FileChangeRec {
+    pub path: String,
+    pub kind: String,
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[serde(tag = "event", rename_all = "snake_case")]
 pub enum GantryEvent {
@@ -135,6 +142,10 @@ pub enum GantryEvent {
         total_cache_read: u64,
         total_cache_write: u64,
         duration_ms: u64,
+    },
+    Changes {
+        ts: u64,
+        files: Vec<FileChangeRec>,
     },
 }
 

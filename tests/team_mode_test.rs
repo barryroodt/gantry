@@ -122,6 +122,7 @@ fn test_validated(workdir: &TempDir, prompt_file: &std::path::Path) -> Validated
         unify_prompt: None,
         tools: vec![],
         shell_allow: vec![],
+        isolate: false,
     }
 }
 

@@ -19,6 +19,8 @@ struct ProfileManifest {
     inject_skills: Vec<String>,
     #[serde(default)]
     shell_allow: Vec<String>,
+    #[serde(default)]
+    isolate: bool,
 }
 
 /// A profile resolved to concrete values: the referenced prompt files are read
@@ -33,6 +35,7 @@ pub struct LoadedProfile {
     pub tools: Vec<String>,
     pub inject_skills: Vec<String>,
     pub shell_allow: Vec<String>,
+    pub isolate: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -65,6 +68,7 @@ pub fn load_profile(dir: &Path) -> Result<LoadedProfile, ProfileError> {
         tools: manifest.tools,
         inject_skills: manifest.inject_skills,
         shell_allow: manifest.shell_allow,
+        isolate: manifest.isolate,
     })
 }
 

@@ -29,6 +29,7 @@ fn base_cli(workdir: &Path, prompt_file: &Path) -> Cli {
         subagent_system_file: None,
         tools: vec![],
         profile: None,
+        isolate: false,
     }
 }
 

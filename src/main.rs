@@ -3,7 +3,7 @@ use std::time::Instant;
 
 use futures_util::FutureExt;
 use gantry::{
-    cli::{Cli, Mode},
+    cli::Cli,
     events::{now_ms, ErrorKind, ExitCode, GantryEvent},
     meter::MeterSnapshot,
     mode::{self, ModeRunOutcome},
@@ -74,10 +74,7 @@ async fn run_inner() -> ModeRunOutcome {
     }
     .emit();
 
-    match v.mode {
-        Mode::Single => mode::single::run_single(v).await,
-        Mode::Team => mode::team::run_team(v).await,
-    }
+    mode::run(v).await
 }
 
 #[tokio::main]
