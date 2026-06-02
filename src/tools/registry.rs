@@ -24,11 +24,29 @@ pub fn available_tool_names() -> Vec<&'static str> {
 pub struct ToolRegistry {
     workdir: PathBuf,
     allow: Vec<String>,
+    shell_allow: Vec<String>,
 }
 
 impl ToolRegistry {
     pub fn new(workdir: PathBuf, allow: Vec<String>) -> Self {
-        Self { workdir, allow }
+        Self {
+            workdir,
+            allow,
+            shell_allow: shell::ALLOWED_PROGRAMS
+                .iter()
+                .map(|s| (*s).to_string())
+                .collect(),
+        }
+    }
+
+    /// Override the shell program allowlist (from a profile's `shell_allow`).
+    /// Empty input keeps the default read-only set.
+    #[must_use]
+    pub fn with_shell_allow(mut self, allow: Vec<String>) -> Self {
+        if !allow.is_empty() {
+            self.shell_allow = allow;
+        }
+        self
     }
 
     fn base_schemas() -> Vec<ToolSchema> {
@@ -55,8 +73,10 @@ impl ToolRegistry {
             },
             ToolSchema {
                 name: "shell".into(),
-                description: "Run an allowlisted shell program (git/cat/ls/find).".into(),
-                json_schema: serde_json::json!({"type":"object","properties":{"program":{"type":"string"},"args":{"type":"array","items":{"type":"string"}}},"required":["program"]}),
+                description:
+                    "Run a bash command in the workdir; only allowlisted programs may be invoked."
+                        .into(),
+                json_schema: serde_json::json!({"type":"object","properties":{"command":{"type":"string"}},"required":["command"]}),
             },
             ToolSchema {
                 name: "skill_load".into(),
@@ -147,7 +167,7 @@ impl ToolRegistry {
             "shell" => {
                 let args: shell::ShellArgs = serde_json::from_str(args_json)
                     .map_err(|e| ToolError::InvalidInput(e.to_string()))?;
-                shell::shell(&self.workdir, args).await
+                shell::shell(&self.workdir, args, &self.shell_allow).await
             }
             "skill_load" => {
                 let args: skill_load::SkillLoadArgs = serde_json::from_str(args_json)

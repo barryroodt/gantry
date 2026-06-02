@@ -171,12 +171,7 @@ async fn disallowed_tool_dispatch_returns_unknown_tool() {
     let registry = ToolRegistry::new(dir.path().to_path_buf(), vec!["read_file".into()]);
 
     let out = registry
-        .dispatch(
-            "assistant",
-            1,
-            "shell",
-            r#"{"program":"git","args":["--version"]}"#,
-        )
+        .dispatch("assistant", 1, "shell", r#"{"command":"git --version"}"#)
         .await;
 
     assert!(out.content.contains("unknown tool"), "got: {}", out.content);
