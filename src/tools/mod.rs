@@ -9,6 +9,7 @@ pub mod shell;
 pub mod skill_load;
 pub mod subagent;
 pub mod truncate;
+pub mod write_file;
 
 pub use registry::ToolRegistry;
 
