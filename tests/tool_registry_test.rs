@@ -304,3 +304,47 @@ async fn write_file_dispatches_when_allowed() {
         "hello"
     );
 }
+
+#[test]
+fn decide_stop_is_control_only_invisible_by_default() {
+    use gantry::tools::registry::available_tool_names;
+    // Not user-grantable via --tool, and absent from the default tool surface.
+    assert!(!available_tool_names().contains(&"decide_stop"));
+    let default = ToolRegistry::new(std::env::temp_dir(), vec![]);
+    let names: Vec<String> = default.schemas().iter().map(|s| s.name.clone()).collect();
+    assert!(
+        !names.contains(&"decide_stop".to_string()),
+        "decide_stop must be invisible by default: {names:?}"
+    );
+    // Surfaced only when the registry grants it explicitly (loop mode).
+    let loop_reg = ToolRegistry::new(std::env::temp_dir(), vec!["decide_stop".into()]);
+    let names: Vec<String> = loop_reg.schemas().iter().map(|s| s.name.clone()).collect();
+    assert!(
+        names.contains(&"decide_stop".to_string()),
+        "granted: {names:?}"
+    );
+}
+
+#[tokio::test]
+async fn decide_stop_dispatch_gated_then_allowed() {
+    let _guard = TestEmitterGuard::install();
+    let denied = ToolRegistry::new(std::env::temp_dir(), vec![]);
+    let out = denied
+        .dispatch("assistant", 1, "decide_stop", r#"{"reason":"x"}"#)
+        .await;
+    assert!(
+        out.content.contains("unknown tool"),
+        "gated: {}",
+        out.content
+    );
+
+    let granted = ToolRegistry::new(std::env::temp_dir(), vec!["decide_stop".into()]);
+    let out = granted
+        .dispatch("assistant", 1, "decide_stop", r#"{"reason":"good enough"}"#)
+        .await;
+    assert!(
+        out.content.contains("stop requested"),
+        "allowed: {}",
+        out.content
+    );
+}

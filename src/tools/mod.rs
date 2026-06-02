@@ -1,5 +1,6 @@
 pub mod ast_edit;
 pub mod ast_grep;
+pub mod decide_stop;
 pub mod edit_file;
 pub mod find_files;
 pub mod git_diff;

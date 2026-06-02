@@ -1,6 +1,6 @@
 use super::{
-    ast_edit, ast_grep, edit_file, find_files, git_diff, list_files, read_file, shell, skill_load,
-    write_file, ToolError, ToolOutput,
+    ast_edit, ast_grep, decide_stop, edit_file, find_files, git_diff, list_files, read_file, shell,
+    skill_load, write_file, ToolError, ToolOutput,
 };
 use crate::events::{now_ms, truncate_args, GantryEvent};
 use crate::provider::ToolSchema;
@@ -20,6 +20,10 @@ pub const BASE_TOOL_NAMES: &[&str] = &[
 /// Mutating / opt-in tools: never default-allowed; surfaced + dispatchable only
 /// when a profile's allowlist names them explicitly.
 pub const OPTIN_TOOL_NAMES: &[&str] = &["ast_edit", "edit_file", "write_file"];
+
+/// Control tools: harness-granted only (never via `--tool`, never in the default
+/// sets). Explicit-only at dispatch, like opt-in tools.
+pub const CONTROL_TOOL_NAMES: &[&str] = &[decide_stop::DECIDE_STOP];
 
 /// Tool names the model may be granted via `--tool` or a profile `tools` list.
 pub fn available_tool_names() -> Vec<&'static str> {
@@ -126,6 +130,16 @@ impl ToolRegistry {
         ]
     }
 
+    /// Control-tool schemas (e.g. `decide_stop`) — surfaced only when the loop
+    /// registry grants them explicitly.
+    fn control_schemas() -> Vec<ToolSchema> {
+        vec![ToolSchema {
+            name: decide_stop::DECIDE_STOP.into(),
+            description: "Stop the iterative loop after this pass (loop mode only).".into(),
+            json_schema: serde_json::json!({"type":"object","properties":{"reason":{"type":"string"}}}),
+        }]
+    }
+
     /// JSON schemas to send to the provider as available tools.
     pub fn schemas(&self) -> Vec<ToolSchema> {
         let mut schemas = Self::base_schemas();
@@ -136,6 +150,12 @@ impl ToolRegistry {
         for opt in Self::optin_schemas() {
             if self.allow.iter().any(|t| t == &opt.name) {
                 schemas.push(opt);
+            }
+        }
+        // Control tools (e.g. decide_stop) appear only when granted explicitly.
+        for ctrl in Self::control_schemas() {
+            if self.allow.iter().any(|t| t == &ctrl.name) {
+                schemas.push(ctrl);
             }
         }
         schemas
@@ -185,7 +205,8 @@ impl ToolRegistry {
     }
 
     async fn dispatch_inner(&self, name: &str, args_json: &str) -> Result<ToolOutput, ToolError> {
-        let allowed = if OPTIN_TOOL_NAMES.contains(&name) {
+        let explicit_only = OPTIN_TOOL_NAMES.contains(&name) || CONTROL_TOOL_NAMES.contains(&name);
+        let allowed = if explicit_only {
             self.allow.iter().any(|t| t == name)
         } else {
             self.allow.is_empty() || self.allow.iter().any(|t| t == name)
@@ -243,6 +264,11 @@ impl ToolRegistry {
                 let args: edit_file::EditFileArgs = serde_json::from_str(args_json)
                     .map_err(|e| ToolError::InvalidInput(e.to_string()))?;
                 edit_file::edit_file(&self.workdir, args).await
+            }
+            "decide_stop" => {
+                let args: decide_stop::DecideStopArgs = serde_json::from_str(args_json)
+                    .map_err(|e| ToolError::InvalidInput(e.to_string()))?;
+                decide_stop::decide_stop(args).await
             }
             other => Err(ToolError::UnknownTool(other.into())),
         }
