@@ -21,6 +21,7 @@ struct ProfileManifest {
     shell_allow: Vec<String>,
     #[serde(default)]
     isolate: bool,
+    max_iterations: Option<u32>,
 }
 
 /// A profile resolved to concrete values: the referenced prompt files are read
@@ -36,6 +37,7 @@ pub struct LoadedProfile {
     pub inject_skills: Vec<String>,
     pub shell_allow: Vec<String>,
     pub isolate: bool,
+    pub max_iterations: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -69,6 +71,7 @@ pub fn load_profile(dir: &Path) -> Result<LoadedProfile, ProfileError> {
         inject_skills: manifest.inject_skills,
         shell_allow: manifest.shell_allow,
         isolate: manifest.isolate,
+        max_iterations: manifest.max_iterations,
     })
 }
 

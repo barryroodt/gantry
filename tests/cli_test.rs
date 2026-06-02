@@ -30,6 +30,7 @@ fn base_cli(workdir: &Path, prompt_file: &Path) -> Cli {
         tools: vec![],
         profile: None,
         isolate: false,
+        max_iterations: None,
     }
 }
 

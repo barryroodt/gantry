@@ -60,6 +60,11 @@ pub struct Cli {
     /// available the run errors. Also enabled by a profile `isolate = true`.
     #[arg(long)]
     pub isolate: bool,
+
+    /// Max iterations for `--mode loop` (default 5; min 1). Overrides a profile
+    /// `max_iterations`. Ignored in single/team modes.
+    #[arg(long = "max-iterations", value_name = "N")]
+    pub max_iterations: Option<u32>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, ValueEnum, Deserialize)]
@@ -172,6 +177,7 @@ pub struct Validated {
     pub tools: Vec<String>,
     pub shell_allow: Vec<String>,
     pub isolate: bool,
+    pub max_iterations: u32,
 }
 
 impl Cli {
@@ -269,6 +275,12 @@ impl Cli {
             .unwrap_or_default();
         // Isolation is opt-in and additive: enabled by the flag or the profile.
         let isolate = self.isolate || profile.as_ref().map(|p| p.isolate).unwrap_or(false);
+        // Loop iteration cap: CLI flag, else profile, else default 5 (min 1).
+        let max_iterations = self
+            .max_iterations
+            .or_else(|| profile.as_ref().and_then(|p| p.max_iterations))
+            .unwrap_or(5)
+            .max(1);
 
         Ok(Validated {
             mode,
@@ -286,6 +298,7 @@ impl Cli {
             tools,
             shell_allow,
             isolate,
+            max_iterations,
         })
     }
 

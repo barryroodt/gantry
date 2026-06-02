@@ -147,6 +147,15 @@ pub enum GantryEvent {
         ts: u64,
         files: Vec<FileChangeRec>,
     },
+    IterationStart {
+        ts: u64,
+        iteration: u32,
+    },
+    IterationEnd {
+        ts: u64,
+        iteration: u32,
+        stopped: bool,
+    },
 }
 
 impl GantryEvent {
