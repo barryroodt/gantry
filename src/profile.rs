@@ -17,6 +17,8 @@ struct ProfileManifest {
     tools: Vec<String>,
     #[serde(default)]
     inject_skills: Vec<String>,
+    #[serde(default)]
+    shell_allow: Vec<String>,
 }
 
 /// A profile resolved to concrete values: the referenced prompt files are read
@@ -30,6 +32,7 @@ pub struct LoadedProfile {
     pub unify_prompt: Option<String>,
     pub tools: Vec<String>,
     pub inject_skills: Vec<String>,
+    pub shell_allow: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -61,6 +64,7 @@ pub fn load_profile(dir: &Path) -> Result<LoadedProfile, ProfileError> {
         unify_prompt: read_profile_file(dir, manifest.unify.as_deref())?,
         tools: manifest.tools,
         inject_skills: manifest.inject_skills,
+        shell_allow: manifest.shell_allow,
     })
 }
 

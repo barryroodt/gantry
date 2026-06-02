@@ -1,5 +1,6 @@
 use super::{
-    find_files, git_diff, list_files, read_file, shell, skill_load, ToolError, ToolOutput,
+    ast_edit, ast_grep, find_files, git_diff, list_files, read_file, shell, skill_load, ToolError,
+    ToolOutput,
 };
 use crate::events::{now_ms, truncate_args, GantryEvent};
 use crate::provider::ToolSchema;
@@ -11,13 +12,22 @@ pub const BASE_TOOL_NAMES: &[&str] = &[
     "list_files",
     "find_files",
     "git_diff",
+    "ast_grep",
     "shell",
     "skill_load",
 ];
 
+/// Mutating / opt-in tools: never default-allowed; surfaced + dispatchable only
+/// when a profile's allowlist names them explicitly.
+pub const OPTIN_TOOL_NAMES: &[&str] = &["ast_edit"];
+
 /// Tool names the model may be granted via `--tool` or a profile `tools` list.
 pub fn available_tool_names() -> Vec<&'static str> {
-    BASE_TOOL_NAMES.to_vec()
+    BASE_TOOL_NAMES
+        .iter()
+        .chain(OPTIN_TOOL_NAMES.iter())
+        .copied()
+        .collect()
 }
 
 /// Native tool dispatcher. Owns workdir + emits `tool_call` / `tool_result` pairs around each call.
@@ -54,7 +64,7 @@ impl ToolRegistry {
             ToolSchema {
                 name: "read_file".into(),
                 description: "Read a file from the workdir.".into(),
-                json_schema: serde_json::json!({"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}),
+                json_schema: serde_json::json!({"type":"object","properties":{"path":{"type":"string"},"outline":{"type":"boolean"}},"required":["path"]}),
             },
             ToolSchema {
                 name: "list_files".into(),
@@ -72,6 +82,11 @@ impl ToolRegistry {
                 json_schema: serde_json::json!({"type":"object","properties":{"range":{"type":"string"},"paths":{"type":"array","items":{"type":"string"}}}}),
             },
             ToolSchema {
+                name: "ast_grep".into(),
+                description: "Structural (AST) code search: pattern -> match locations.".into(),
+                json_schema: serde_json::json!({"type":"object","properties":{"pattern":{"type":"string"},"paths":{"type":"array","items":{"type":"string"}},"lang":{"type":"string"}},"required":["pattern"]}),
+            },
+            ToolSchema {
                 name: "shell".into(),
                 description:
                     "Run a bash command in the workdir; only allowlisted programs may be invoked."
@@ -87,11 +102,27 @@ impl ToolRegistry {
         ]
     }
 
+    /// Opt-in (mutating) tool schemas — surfaced only when explicitly allowed.
+    fn optin_schemas() -> Vec<ToolSchema> {
+        vec![ToolSchema {
+            name: "ast_edit".into(),
+            description:
+                "Structural (AST) code REWRITE (mutating): pattern -> rewrite across files.".into(),
+            json_schema: serde_json::json!({"type":"object","properties":{"pattern":{"type":"string"},"rewrite":{"type":"string"},"paths":{"type":"array","items":{"type":"string"}}},"required":["pattern","rewrite"]}),
+        }]
+    }
+
     /// JSON schemas to send to the provider as available tools.
     pub fn schemas(&self) -> Vec<ToolSchema> {
         let mut schemas = Self::base_schemas();
         if !self.allow.is_empty() {
             schemas.retain(|s| self.allow.iter().any(|t| t == &s.name));
+        }
+        // Opt-in tools appear only when the allowlist names them explicitly.
+        for opt in Self::optin_schemas() {
+            if self.allow.iter().any(|t| t == &opt.name) {
+                schemas.push(opt);
+            }
         }
         schemas
     }
@@ -140,7 +171,12 @@ impl ToolRegistry {
     }
 
     async fn dispatch_inner(&self, name: &str, args_json: &str) -> Result<ToolOutput, ToolError> {
-        if !self.allow.is_empty() && !self.allow.iter().any(|t| t == name) {
+        let allowed = if OPTIN_TOOL_NAMES.contains(&name) {
+            self.allow.iter().any(|t| t == name)
+        } else {
+            self.allow.is_empty() || self.allow.iter().any(|t| t == name)
+        };
+        if !allowed {
             return Err(ToolError::UnknownTool(name.to_string()));
         }
         match name {
@@ -163,6 +199,16 @@ impl ToolRegistry {
                 let args: git_diff::GitDiffArgs = serde_json::from_str(args_json)
                     .map_err(|e| ToolError::InvalidInput(e.to_string()))?;
                 git_diff::git_diff(&self.workdir, args).await
+            }
+            "ast_grep" => {
+                let args: ast_grep::AstGrepArgs = serde_json::from_str(args_json)
+                    .map_err(|e| ToolError::InvalidInput(e.to_string()))?;
+                ast_grep::ast_grep(&self.workdir, args).await
+            }
+            "ast_edit" => {
+                let args: ast_edit::AstEditArgs = serde_json::from_str(args_json)
+                    .map_err(|e| ToolError::InvalidInput(e.to_string()))?;
+                ast_edit::ast_edit(&self.workdir, args).await
             }
             "shell" => {
                 let args: shell::ShellArgs = serde_json::from_str(args_json)

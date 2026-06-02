@@ -11,7 +11,9 @@ tools = [
     "list_files",
     "find_files",
     "git_diff",
+    "ast_grep",
     "shell",
     "skill_load",
 ]
 inject_skills = ["caveman-review", "agent-team-review", "code-review", "confidence-rating"]
+shell_allow = ["git", "cat", "ls", "find"]

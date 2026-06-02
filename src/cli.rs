@@ -163,6 +163,7 @@ pub struct Validated {
     pub compose_prompt: Option<String>,
     pub unify_prompt: Option<String>,
     pub tools: Vec<String>,
+    pub shell_allow: Vec<String>,
 }
 
 impl Cli {
@@ -254,6 +255,10 @@ impl Cli {
         } else {
             self.inject_skills
         };
+        let shell_allow = profile
+            .as_ref()
+            .map(|p| p.shell_allow.clone())
+            .unwrap_or_default();
 
         Ok(Validated {
             mode,
@@ -269,6 +274,7 @@ impl Cli {
             compose_prompt,
             unify_prompt,
             tools,
+            shell_allow,
         })
     }
 

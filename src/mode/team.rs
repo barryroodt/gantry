@@ -402,10 +402,10 @@ pub async fn run_team(validated: Validated) -> ModeRunOutcome {
     };
 
     let roster = Arc::new(SubagentRoster::new());
-    let registry = Arc::new(ToolRegistry::new(
-        validated.workdir.clone(),
-        validated.tools.clone(),
-    ));
+    let registry = Arc::new(
+        ToolRegistry::new(validated.workdir.clone(), validated.tools.clone())
+            .with_shell_allow(validated.shell_allow.clone()),
+    );
     let skill_loader = SkillLoader::new(validated.workdir.clone());
 
     let exit = TeamMode {

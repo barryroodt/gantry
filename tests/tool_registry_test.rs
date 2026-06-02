@@ -4,21 +4,22 @@ use gantry::tools::ToolRegistry;
 use gantry_evals::assertions::assert_tool_call_pairing;
 use tempfile::TempDir;
 
-const EXPECTED_TOOL_NAMES: [&str; 6] = [
+const EXPECTED_TOOL_NAMES: [&str; 7] = [
     "read_file",
     "list_files",
     "find_files",
     "git_diff",
+    "ast_grep",
     "shell",
     "skill_load",
 ];
 
 #[test]
-fn schemas_returns_six_stable_tool_names() {
+fn schemas_returns_default_tool_names() {
     let registry = ToolRegistry::new(std::env::temp_dir(), vec![]);
     let schemas = registry.schemas();
 
-    assert_eq!(schemas.len(), 6);
+    assert_eq!(schemas.len(), 7);
     let names: Vec<&str> = schemas.iter().map(|schema| schema.name.as_str()).collect();
     assert_eq!(names, EXPECTED_TOOL_NAMES);
 }
@@ -145,12 +146,17 @@ async fn dispatch_error_still_emits_paired_events_with_error_field() {
 
 #[test]
 fn base_tool_names_const_matches_schemas() {
-    use gantry::tools::registry::{available_tool_names, BASE_TOOL_NAMES};
+    use gantry::tools::registry::{available_tool_names, BASE_TOOL_NAMES, OPTIN_TOOL_NAMES};
     let registry = ToolRegistry::new(std::env::temp_dir(), vec![]);
     let schemas = registry.schemas();
     let names: Vec<&str> = schemas.iter().map(|s| s.name.as_str()).collect();
     assert_eq!(names, BASE_TOOL_NAMES);
-    assert_eq!(available_tool_names(), BASE_TOOL_NAMES);
+    let expected: Vec<&str> = BASE_TOOL_NAMES
+        .iter()
+        .chain(OPTIN_TOOL_NAMES.iter())
+        .copied()
+        .collect();
+    assert_eq!(available_tool_names(), expected);
 }
 
 #[test]
@@ -189,4 +195,45 @@ async fn allowlisted_tool_dispatches_normally() {
         .await;
 
     assert!(out.content.contains("hello world"), "got: {}", out.content);
+}
+
+#[test]
+fn ast_edit_is_opt_in_default_out() {
+    // Default registry: ast_grep is default-in, ast_edit is default-out.
+    let default = ToolRegistry::new(std::env::temp_dir(), vec![]);
+    let names: Vec<String> = default.schemas().iter().map(|s| s.name.clone()).collect();
+    assert!(
+        names.contains(&"ast_grep".to_string()),
+        "ast_grep should be default-in: {names:?}"
+    );
+    assert!(
+        !names.contains(&"ast_edit".to_string()),
+        "ast_edit must be default-out: {names:?}"
+    );
+
+    // Opting in surfaces ast_edit in the schemas.
+    let optin = ToolRegistry::new(std::env::temp_dir(), vec!["ast_edit".into()]);
+    let names: Vec<String> = optin.schemas().iter().map(|s| s.name.clone()).collect();
+    assert!(
+        names.contains(&"ast_edit".to_string()),
+        "ast_edit should be exposed when allowlisted: {names:?}"
+    );
+}
+
+#[tokio::test]
+async fn ast_edit_dispatch_denied_without_optin() {
+    let registry = ToolRegistry::new(std::env::temp_dir(), vec![]);
+    let out = registry
+        .dispatch(
+            "assistant",
+            1,
+            "ast_edit",
+            r#"{"pattern":"a","rewrite":"b"}"#,
+        )
+        .await;
+    assert!(
+        out.content.contains("unknown tool"),
+        "default-out ast_edit must be denied at dispatch: {}",
+        out.content
+    );
 }

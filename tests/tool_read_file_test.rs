@@ -16,6 +16,7 @@ async fn read_file_happy_path() {
         workdir,
         ReadFileArgs {
             path: "hello.txt".into(),
+            outline: false,
         },
     )
     .await
@@ -38,6 +39,7 @@ async fn read_file_truncates_large_files() {
         workdir,
         ReadFileArgs {
             path: "big.bin".into(),
+            outline: false,
         },
     )
     .await
@@ -58,6 +60,7 @@ async fn read_file_rejects_path_traversal() {
         workdir,
         ReadFileArgs {
             path: "../etc/passwd".into(),
+            outline: false,
         },
     )
     .await
@@ -88,6 +91,7 @@ async fn read_file_rejects_symlink_escape() {
         workdir,
         ReadFileArgs {
             path: "link.txt".into(),
+            outline: false,
         },
     )
     .await
@@ -105,6 +109,7 @@ async fn read_file_missing_file() {
         workdir,
         ReadFileArgs {
             path: "does-not-exist.txt".into(),
+            outline: false,
         },
     )
     .await
@@ -135,6 +140,7 @@ async fn read_file_truncates_on_utf8_boundary() {
         workdir,
         ReadFileArgs {
             path: "utf8_edge.txt".into(),
+            outline: false,
         },
     )
     .await
