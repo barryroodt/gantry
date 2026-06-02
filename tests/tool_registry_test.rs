@@ -237,3 +237,70 @@ async fn ast_edit_dispatch_denied_without_optin() {
         out.content
     );
 }
+
+#[test]
+fn mutation_tools_are_opt_in_default_out() {
+    let default = ToolRegistry::new(std::env::temp_dir(), vec![]);
+    let names: Vec<String> = default.schemas().iter().map(|s| s.name.clone()).collect();
+    for t in ["write_file", "edit_file"] {
+        assert!(
+            !names.contains(&t.to_string()),
+            "{t} must be default-out: {names:?}"
+        );
+    }
+    let optin = ToolRegistry::new(
+        std::env::temp_dir(),
+        vec!["write_file".into(), "edit_file".into()],
+    );
+    let names: Vec<String> = optin.schemas().iter().map(|s| s.name.clone()).collect();
+    for t in ["write_file", "edit_file"] {
+        assert!(
+            names.contains(&t.to_string()),
+            "{t} should be exposed when allowlisted: {names:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn write_file_dispatch_denied_without_optin() {
+    let dir = TempDir::new().unwrap();
+    let _guard = TestEmitterGuard::install();
+    let registry = ToolRegistry::new(dir.path().to_path_buf(), vec![]);
+    let out = registry
+        .dispatch(
+            "assistant",
+            1,
+            "write_file",
+            r#"{"path":"x.txt","content":"y"}"#,
+        )
+        .await;
+    assert!(
+        out.content.contains("unknown tool"),
+        "default-out write_file must be denied: {}",
+        out.content
+    );
+    assert!(
+        !dir.path().join("x.txt").exists(),
+        "no file created when the tool is denied"
+    );
+}
+
+#[tokio::test]
+async fn write_file_dispatches_when_allowed() {
+    let dir = TempDir::new().unwrap();
+    let _guard = TestEmitterGuard::install();
+    let registry = ToolRegistry::new(dir.path().to_path_buf(), vec!["write_file".into()]);
+    let out = registry
+        .dispatch(
+            "assistant",
+            1,
+            "write_file",
+            r#"{"path":"x.txt","content":"hello"}"#,
+        )
+        .await;
+    assert!(out.content.contains("wrote"), "got: {}", out.content);
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("x.txt")).unwrap(),
+        "hello"
+    );
+}

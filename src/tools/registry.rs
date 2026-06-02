@@ -1,6 +1,6 @@
 use super::{
-    ast_edit, ast_grep, find_files, git_diff, list_files, read_file, shell, skill_load, ToolError,
-    ToolOutput,
+    ast_edit, ast_grep, edit_file, find_files, git_diff, list_files, read_file, shell, skill_load,
+    write_file, ToolError, ToolOutput,
 };
 use crate::events::{now_ms, truncate_args, GantryEvent};
 use crate::provider::ToolSchema;
@@ -19,7 +19,7 @@ pub const BASE_TOOL_NAMES: &[&str] = &[
 
 /// Mutating / opt-in tools: never default-allowed; surfaced + dispatchable only
 /// when a profile's allowlist names them explicitly.
-pub const OPTIN_TOOL_NAMES: &[&str] = &["ast_edit"];
+pub const OPTIN_TOOL_NAMES: &[&str] = &["ast_edit", "edit_file", "write_file"];
 
 /// Tool names the model may be granted via `--tool` or a profile `tools` list.
 pub fn available_tool_names() -> Vec<&'static str> {
@@ -104,12 +104,26 @@ impl ToolRegistry {
 
     /// Opt-in (mutating) tool schemas — surfaced only when explicitly allowed.
     fn optin_schemas() -> Vec<ToolSchema> {
-        vec![ToolSchema {
-            name: "ast_edit".into(),
-            description:
-                "Structural (AST) code REWRITE (mutating): pattern -> rewrite across files.".into(),
-            json_schema: serde_json::json!({"type":"object","properties":{"pattern":{"type":"string"},"rewrite":{"type":"string"},"paths":{"type":"array","items":{"type":"string"}}},"required":["pattern","rewrite"]}),
-        }]
+        vec![
+            ToolSchema {
+                name: "ast_edit".into(),
+                description:
+                    "Structural (AST) code REWRITE (mutating): pattern -> rewrite across files."
+                        .into(),
+                json_schema: serde_json::json!({"type":"object","properties":{"pattern":{"type":"string"},"rewrite":{"type":"string"},"paths":{"type":"array","items":{"type":"string"}}},"required":["pattern","rewrite"]}),
+            },
+            ToolSchema {
+                name: "write_file".into(),
+                description: "Create or overwrite a workdir file (mutating).".into(),
+                json_schema: serde_json::json!({"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"}},"required":["path","content"]}),
+            },
+            ToolSchema {
+                name: "edit_file".into(),
+                description: "Literal, count-guarded search/replace in a workdir file (mutating)."
+                    .into(),
+                json_schema: serde_json::json!({"type":"object","properties":{"path":{"type":"string"},"search":{"type":"string"},"replace":{"type":"string"},"expected_count":{"type":"integer"}},"required":["path","search","replace"]}),
+            },
+        ]
     }
 
     /// JSON schemas to send to the provider as available tools.
@@ -219,6 +233,16 @@ impl ToolRegistry {
                 let args: skill_load::SkillLoadArgs = serde_json::from_str(args_json)
                     .map_err(|e| ToolError::InvalidInput(e.to_string()))?;
                 skill_load::skill_load(&self.workdir, args).await
+            }
+            "write_file" => {
+                let args: write_file::WriteFileArgs = serde_json::from_str(args_json)
+                    .map_err(|e| ToolError::InvalidInput(e.to_string()))?;
+                write_file::write_file(&self.workdir, args).await
+            }
+            "edit_file" => {
+                let args: edit_file::EditFileArgs = serde_json::from_str(args_json)
+                    .map_err(|e| ToolError::InvalidInput(e.to_string()))?;
+                edit_file::edit_file(&self.workdir, args).await
             }
             other => Err(ToolError::UnknownTool(other.into())),
         }
