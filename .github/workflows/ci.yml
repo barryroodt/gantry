@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    name: gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install pinned toolchain (mise)
+        uses: jdx/mise-action@v2
+
+      - name: Cargo cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Format
+        run: mise exec -- cargo fmt --check
+
+      - name: Build
+        run: mise exec -- cargo build --workspace --all-targets
+
+      - name: Clippy
+        run: mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Test
+        run: mise exec -- cargo test --workspace
