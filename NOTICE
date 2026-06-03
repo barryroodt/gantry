@@ -1,0 +1,18 @@
+Gantry
+Copyright 2026 The Gantry Authors
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+---
+
+This software depends on third-party crates retrieved via Cargo, each under its
+own license. Notably, the tool layer is built on components of the oh-my-pi
+project (https://github.com/can1357/oh-my-pi):
+
+  - pi-ast   — structural (tree-sitter / ast-grep) code search and rewrite
+  - pi-shell — in-process bash execution with output minimization
+  - pi-iso   — copy-on-write workspace isolation and diff capture
+
+LLM provider adapters are built on rig (https://github.com/0xPlaygrounds/rig).
+
+Refer to each dependency's repository and license for its terms.
