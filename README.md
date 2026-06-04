@@ -17,7 +17,7 @@ Most agent frameworks want to live *inside* your process and own your control fl
 
 ## Features
 
-- **Three execution modes** — `single` (one agent to completion), `team` (a coordinator orchestrates parallel reviewer subagents over bounded rounds), and `loop` (iterate-until-done with a model-driven stop signal).
+- **Three execution modes** — `single` (one agent to completion), `team` (a coordinator orchestrates parallel subagents over bounded rounds and unifies their outputs), and `loop` (iterate-until-done with a model-driven stop signal).
 - **Curated tool set** — read, list, glob, `git diff`, structural AST search, and allowlisted `bash`, plus opt-in **mutation** tools (write / search-replace / AST rewrite) that are off by default.
 - **Copy-on-write isolation** — `--isolate` runs the agent against a COW shadow of the workspace; the original is never touched and a terminal `changes` event reports exactly what was modified.
 - **Output compression** — verbose tool output is capped (head+tail with a recovery hint) and deduped at the tool boundary to keep the model's context tight; savings are reported per call.
@@ -88,7 +88,7 @@ Everything after the first `/` in `--model` is the bare model id forwarded to th
 ## Modes
 
 - **`single`** — one agent runs a bounded tool loop (model call → tool dispatch → repeat) until it stops calling tools or hits the turn cap. The general-purpose path.
-- **`team`** — a coordinator plans the work, spawns reviewer subagents that run their own tool loops in parallel, collects their findings at a barrier, digests + broadcasts a summary, and runs another round; it unifies the result at the end. Bounded rounds. (See [ADR-0005](docs/decisions/0005-team-orchestration.md).)
+- **`team`** — a coordinator composes a plan of subagents; each runs its own tool loop in parallel, their outputs are collected at a barrier, digested and broadcast between bounded rounds, then unified into a single structured result. The *output shape* is defined by the profile's `unify.md` (e.g. `profiles/review` produces a review report) — the harness itself is task-agnostic. (See [ADR-0005](docs/decisions/0005-team-orchestration.md), [ADR-0011](docs/decisions/0011-generalize-team-mode.md).)
 - **`loop`** — runs the agent in bounded **iterations**, each a fresh pass seeded with a *compact summary* of the previous attempt (not a growing transcript). The agent ends early by calling the `decide_stop` control tool, otherwise it runs to `--max-iterations`. Ideal for "assess → improve, repeat" workflows. (See [ADR-0008](docs/decisions/0008-sp3-loop-mode.md).)
 
 ## Tools
