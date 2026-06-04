@@ -38,7 +38,7 @@ impl TeamMode {
             .skill_loader
             .inject_core_skills(&self.validated.inject_skills);
 
-        // 1. Compose the reviewer plan (structured, metered).
+        // 1. Compose the subagent plan (structured, metered).
         let compose_system =
             self.phase_system(&system_prefix, self.validated.compose_prompt.as_deref());
         let compose_msgs = vec![ChatMessage::User(self.prompt.clone())];
@@ -50,7 +50,7 @@ impl TeamMode {
             Err(exit) => return exit,
         };
         if plan.is_empty() {
-            return self.collapse("compose produced no reviewers");
+            return self.collapse("compose produced no subagents");
         }
 
         // 2. Spawn one subagent per plan entry.
@@ -86,13 +86,13 @@ impl TeamMode {
         let result = self.rounds_and_unify(&system_prefix).await;
         self.roster.shutdown_and_join().await;
 
-        let findings = match result {
+        let unified = match result {
             Ok(v) => v,
             Err(exit) => return exit,
         };
         let fence = format!(
             "```json\n{}\n```",
-            serde_json::to_string_pretty(&findings).unwrap_or_else(|_| findings.to_string())
+            serde_json::to_string_pretty(&unified).unwrap_or_else(|_| unified.to_string())
         );
         let _ = GantryEvent::AssistantText {
             ts: now_ms(),
@@ -105,7 +105,7 @@ impl TeamMode {
 
     /// Barrier rounds (LoopDriver, cap `MAX_ROUNDS`: collect, then digest +
     /// broadcast between rounds) followed by the unify call. Returns the
-    /// validated findings object, or the terminal exit on collapse / budget /
+    /// validated result object, or the terminal exit on collapse / budget /
     /// cancel. Does not emit the fence — `run` does, after shutting subagents
     /// down — so the ordering invariant holds.
     async fn rounds_and_unify(&self, system_prefix: &str) -> Result<Value, ExitCode> {
@@ -145,10 +145,10 @@ impl TeamMode {
 
         let unify_system = self.phase_system(system_prefix, self.validated.unify_prompt.as_deref());
         let unify_msgs = vec![ChatMessage::User(format!(
-            "{}\n\n# Reviewer reports\n{reports}",
+            "{}\n\n# Subagent reports\n{reports}",
             self.prompt
         ))];
-        self.structured_call(&unify_system, &unify_msgs, &findings_schema())
+        self.structured_call(&unify_system, &unify_msgs, &result_schema())
             .await
     }
 
@@ -274,11 +274,11 @@ impl TeamMode {
 #[derive(Debug, Deserialize)]
 struct ComposePlan {
     #[serde(default)]
-    reviewers: Vec<ReviewerPlan>,
+    subagents: Vec<SubagentPlan>,
 }
 
 #[derive(Debug, Deserialize)]
-struct ReviewerPlan {
+struct SubagentPlan {
     name: String,
     role: String,
     #[serde(default = "full_scope")]
@@ -291,10 +291,10 @@ fn full_scope() -> String {
     "full".to_string()
 }
 
-/// Parse a compose result into a reviewer plan (tolerant: invalid → empty).
-fn parse_plan(value: &Value) -> Vec<ReviewerPlan> {
+/// Parse a compose result into a subagent plan (tolerant: invalid → empty).
+fn parse_plan(value: &Value) -> Vec<SubagentPlan> {
     serde_json::from_value::<ComposePlan>(value.clone())
-        .map(|p| p.reviewers)
+        .map(|p| p.subagents)
         .unwrap_or_default()
 }
 
@@ -302,7 +302,7 @@ fn plan_schema() -> Value {
     serde_json::json!({
         "type": "object",
         "properties": {
-            "reviewers": {
+            "subagents": {
                 "type": "array",
                 "items": {
                     "type": "object",
@@ -316,21 +316,14 @@ fn plan_schema() -> Value {
                 }
             }
         },
-        "required": ["reviewers"]
+        "required": ["subagents"]
     })
 }
 
-fn findings_schema() -> Value {
-    serde_json::json!({
-        "type": "object",
-        "properties": {
-            "summary": {"type": "string"},
-            "verdict": {"type": "string"},
-            "findings": {"type": "array"},
-            "strengths": {"type": "array"}
-        },
-        "required": ["summary", "verdict", "findings"]
-    })
+/// The unify output schema. Permissive by design — the harness imposes no shape;
+/// the profile's `unify.md` prompt defines the structured result it produces.
+fn result_schema() -> Value {
+    serde_json::json!({"type": "object"})
 }
 
 /// Extract and parse the first ```json fenced object from model text.
@@ -346,7 +339,7 @@ fn digest_of(collect_output: &str) -> String {
     let Ok(v) = serde_json::from_str::<Value>(collect_output) else {
         return collect_output.to_string();
     };
-    let mut out = String::from("# Cross-review digest\n");
+    let mut out = String::from("# Round digest\n");
     if let Some(arr) = v.get("subagents").and_then(|s| s.as_array()) {
         for r in arr {
             let name = r.get("name").and_then(|n| n.as_str()).unwrap_or("?");
