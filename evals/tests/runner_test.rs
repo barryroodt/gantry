@@ -137,9 +137,9 @@ async fn team_fixture_003_runs_live() {
         return;
     }
 
-    // Live end-to-end team run on the real fixture: compose → spawned reviewers
-    // read the diff with their tools → unify. run_all asserts the contract
-    // (exit ok, one subagent_done per spawn before the single JSON fence, ≥1 finding).
+    // Live end-to-end team run on the real fixture (review profile): compose →
+    // spawned subagents read the diff with their tools → unify. run_all asserts the
+    // contract (exit ok, one subagent_done per spawn before the single JSON fence, ≥1 finding).
     let fixture =
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("fixtures/003-team-mode-multi-dir");
     let runner = FixtureRunner {
