@@ -17,28 +17,43 @@ jobs:
     name: gate
     runs-on: ubuntu-latest
     steps:
+      # Actions are pinned to commit SHAs (not mutable tags) so a moved/compromised
+      # tag cannot inject code into CI. The trailing comment tracks the version for
+      # Dependabot, which bumps the SHA + comment together.
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      # Supply-chain gate: fail on RUSTSEC advisories, yanked crates, and any crate
+      # source other than crates.io + our allow-listed git dep (policy in deny.toml).
+      # Runs first so a bad dependency short-circuits before the expensive build.
+      - name: Supply-chain audit (cargo-deny)
+        uses: EmbarkStudios/cargo-deny-action@bb137d7af7e4fb67e5f82a49c4fce4fad40782fe # v2.0.20
+        with:
+          command: check
+          command-arguments: advisories bans sources
 
       # Pin Rust to match mise.toml (keep the version in sync). dtolnay reliably
       # installs the rustfmt + clippy components, which mise-action did not.
       - name: Install Rust 1.96 + components
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master, pinned by SHA
         with:
           toolchain: "1.96.0"
           components: rustfmt, clippy
 
       - name: Cargo cache
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2.9.1
 
       - name: Format
         run: cargo fmt --check
 
+      # --locked: build the committed Cargo.lock exactly and fail if it would need
+      # changes. Catches manifest/lock drift and the inconsistent lock-only
+      # dependency PRs that would otherwise silently re-resolve.
       - name: Build
-        run: cargo build --workspace --all-targets
+        run: cargo build --workspace --all-targets --locked
 
       - name: Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
       - name: Test
-        run: cargo test --workspace
+        run: cargo test --workspace --locked

@@ -34,15 +34,24 @@ Priorities: **P1** active friction / correctness-adjacent · **P2** worth doing 
   toolchain from a single source — have CI read `mise.toml`, or add a `rust-toolchain.toml`
   that both mise and `dtolnay/rust-toolchain` honor.
 
-- [ ] **P2 — Close the obsolete `mise-action` Dependabot PR.** PR #2 (bump
-  `jdx/mise-action` 2→4) is moot once the team-mode PR (#5) lands its CI fix — CI no longer
-  uses `mise-action`. Close #2.
+- [x] **P2 — Close the obsolete `mise-action` Dependabot PR.** Done — Dependabot
+  auto-closed #2 when the CI rewrite (#5) removed `jdx/mise-action`.
+
+- [ ] **P3 — Enable the `cargo-deny` license check in CI.** The supply-chain gate (#7)
+  runs `cargo deny check advisories bans sources`; `deny.toml`'s `[licenses]` allow-list is
+  tuned and passes locally but is not yet gated, since it is only verified on macOS and may
+  differ on the Linux runner. **Fix:** run `cargo deny check licenses` on the CI runner,
+  reconcile the allow-list, then add `licenses` to the gated checks.
 
 ## Dependencies
 
-- [ ] **P2 — Triage open Dependabot PRs.** #1 `actions/checkout` 4→6, #3 `rig-core`
-  0.37→0.38.1 (read the changelog — even a minor bump can shift provider behavior), #4
-  `toml` 0.8→1.1 (major). Each must pass `gate` before merge.
+- [x] **P2 — Triage open Dependabot PRs.** Done. #2 auto-closed; #3 (`rig-core`
+  0.37→0.38.1) and #4 (`toml` 0.8→1.1) **closed as defective** — both were lock-only and
+  manifest-inconsistent (the lock pinned a version the `Cargo.toml` caret excludes), a green
+  no-op that the new `--locked` gate (#7) now fails outright. #1 (`actions/checkout` 4→6)
+  superseded by #7 (pinned to the v6.0.3 SHA). **Re-adopt rig 0.38 / toml 1.x deliberately
+  later:** bump the manifest + lock, run the gate, review the changelogs (rig 0.38 is a
+  breaking-API bump).
 
 - [ ] **P3 — `oh-my-pi` git-deps are rev-pinned.** Several crates pin specific oh-my-pi
   revisions (e.g. `pi-shell` @ `8b619a2`). This blocks crates.io publication (documented in
