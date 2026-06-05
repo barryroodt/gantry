@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       # Pin Rust to match mise.toml (keep the version in sync). dtolnay reliably
       # installs the rustfmt + clippy components, which mise-action did not.
