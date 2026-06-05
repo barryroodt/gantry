@@ -100,9 +100,9 @@ impl ProviderAdapter for RoleTextProvider {
     }
 }
 
-/// Spawn one reviewer through the roster (the post-ADR-0005 mechanism the
+/// Spawn one subagent through the roster (the post-ADR-0005 mechanism the
 /// harness drives directly — no registry tool dispatch). Returns the spawn ack.
-async fn spawn_reviewer(
+async fn spawn_subagent(
     roster: &SubagentRoster,
     provider: &Arc<dyn ProviderAdapter>,
     registry: &Arc<ToolRegistry>,
@@ -121,7 +121,7 @@ async fn spawn_reviewer(
             },
             provider.clone(),
             registry.clone(),
-            "reviewer system".into(),
+            "subagent system".into(),
             meter.clone(),
         )
         .await
@@ -138,7 +138,7 @@ async fn spawn_subagent_adds_to_roster_and_emits_subagent_spawn() {
     let registry = Arc::new(ToolRegistry::new(dir.path().to_path_buf(), vec![]));
     let meter = test_meter();
 
-    let ack = spawn_reviewer(
+    let ack = spawn_subagent(
         &roster,
         &provider,
         &registry,
@@ -178,7 +178,7 @@ async fn broadcast_summary_delivers_to_all_spawned_subagents() {
     let registry = Arc::new(ToolRegistry::new(dir.path().to_path_buf(), vec![]));
     let meter = test_meter();
 
-    spawn_reviewer(
+    spawn_subagent(
         &roster,
         &provider,
         &registry,
@@ -187,7 +187,7 @@ async fn broadcast_summary_delivers_to_all_spawned_subagents() {
         "correctness",
     )
     .await;
-    spawn_reviewer(
+    spawn_subagent(
         &roster,
         &provider,
         &registry,
@@ -245,8 +245,8 @@ async fn collect_outputs_drains_text_from_finished_subagents_in_order() {
     let registry = Arc::new(ToolRegistry::new(dir.path().to_path_buf(), vec![]));
     let meter = test_meter();
 
-    spawn_reviewer(&roster, &provider, &registry, &meter, "alpha", "alpha").await;
-    spawn_reviewer(&roster, &provider, &registry, &meter, "beta", "beta").await;
+    spawn_subagent(&roster, &provider, &registry, &meter, "alpha", "alpha").await;
+    spawn_subagent(&roster, &provider, &registry, &meter, "beta", "beta").await;
 
     let out = roster
         .collect_outputs(
@@ -267,7 +267,7 @@ async fn collect_outputs_drains_text_from_finished_subagents_in_order() {
 }
 
 #[tokio::test]
-async fn partial_failure_one_reviewer_panics_broadcast_and_collect_still_work() {
+async fn partial_failure_one_subagent_panics_broadcast_and_collect_still_work() {
     let dir = TempDir::new().unwrap();
     let roster = Arc::new(SubagentRoster::new());
     let provider: Arc<dyn ProviderAdapter> = Arc::new(
@@ -278,7 +278,7 @@ async fn partial_failure_one_reviewer_panics_broadcast_and_collect_still_work() 
     let registry = Arc::new(ToolRegistry::new(dir.path().to_path_buf(), vec![]));
     let meter = test_meter();
 
-    spawn_reviewer(
+    spawn_subagent(
         &roster,
         &provider,
         &registry,
@@ -287,7 +287,7 @@ async fn partial_failure_one_reviewer_panics_broadcast_and_collect_still_work() 
         "panic-role",
     )
     .await;
-    spawn_reviewer(&roster, &provider, &registry, &meter, "healthy", "healthy").await;
+    spawn_subagent(&roster, &provider, &registry, &meter, "healthy", "healthy").await;
 
     let round1 = roster
         .collect_outputs(
@@ -358,8 +358,8 @@ async fn collect_outputs_returns_structured_name_sorted_status() {
     let meter = test_meter();
 
     // Spawn out of name order to prove collect_outputs sorts by name.
-    spawn_reviewer(&roster, &provider, &registry, &meter, "beta", "beta").await;
-    spawn_reviewer(&roster, &provider, &registry, &meter, "alpha", "alpha").await;
+    spawn_subagent(&roster, &provider, &registry, &meter, "beta", "beta").await;
+    spawn_subagent(&roster, &provider, &registry, &meter, "alpha", "alpha").await;
 
     let c = roster
         .collect_outputs(
@@ -420,7 +420,7 @@ async fn collect_outputs_times_out_slow_subagent() {
     let registry = Arc::new(ToolRegistry::new(dir.path().to_path_buf(), vec![]));
     let meter = test_meter();
 
-    spawn_reviewer(&roster, &provider, &registry, &meter, "slow", "slow").await;
+    spawn_subagent(&roster, &provider, &registry, &meter, "slow", "slow").await;
 
     let out = roster
         .collect_outputs(
@@ -496,7 +496,7 @@ async fn subagent_tool_loop_dispatches_and_reports_result() {
     let registry = Arc::new(ToolRegistry::new(dir.path().to_path_buf(), vec![]));
     let meter = test_meter();
 
-    spawn_reviewer(&roster, &provider, &registry, &meter, "alpha", "alpha").await;
+    spawn_subagent(&roster, &provider, &registry, &meter, "alpha", "alpha").await;
 
     let round1 = roster
         .collect_outputs(

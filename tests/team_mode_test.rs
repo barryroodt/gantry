@@ -97,7 +97,7 @@ impl ProviderAdapter for TeamScriptProvider {
         // Unify turn carries the collected reports; otherwise it is the compose turn.
         let is_unify = messages
             .iter()
-            .any(|m| matches!(m, ChatMessage::User(t) if t.contains("# Reviewer reports")));
+            .any(|m| matches!(m, ChatMessage::User(t) if t.contains("# Subagent reports")));
         if is_unify {
             Ok(respond(&self.unify_json))
         } else {
@@ -163,7 +163,7 @@ async fn team_mode_completes_ok_spawns_plan_and_emits_unify_fence() {
     let guard = TestEmitterGuard::install();
     let dir = TempDir::new().unwrap();
     let provider = Arc::new(TeamScriptProvider::new(
-        r#"{"reviewers":[{"name":"correctness","role":"correctness","scope":"full"},{"name":"spec-compliance","role":"spec-compliance","scope":"full"}]}"#,
+        r#"{"subagents":[{"name":"correctness","role":"correctness","scope":"full"},{"name":"spec-compliance","role":"spec-compliance","scope":"full"}]}"#,
     ));
 
     let exit = run_team_mode(&dir, provider, 100_000).await;
@@ -174,7 +174,7 @@ async fn team_mode_completes_ok_spawns_plan_and_emits_unify_fence() {
         .iter()
         .filter(|e| matches!(e, GantryEvent::SubagentSpawn { .. }))
         .count();
-    assert_eq!(spawns, 2, "expected one spawn per planned reviewer");
+    assert_eq!(spawns, 2, "expected one spawn per planned subagent");
 
     // ADR-0005 validation: one subagent_done per spawned subagent, each emitted
     // before the terminal unify fence (clean shutdown + join, no leaked tasks).
@@ -218,7 +218,7 @@ async fn team_mode_all_subagents_crash_emits_team_collapse() {
     let guard = TestEmitterGuard::install();
     let dir = TempDir::new().unwrap();
     let provider = Arc::new(TeamScriptProvider::new(
-        r#"{"reviewers":[{"name":"a","role":"panic-role","scope":"full"},{"name":"b","role":"panic-role","scope":"full"}]}"#,
+        r#"{"subagents":[{"name":"a","role":"panic-role","scope":"full"},{"name":"b","role":"panic-role","scope":"full"}]}"#,
     ));
 
     let exit = run_team_mode(&dir, provider, 100_000).await;
@@ -241,7 +241,7 @@ async fn team_mode_budget_trip_during_compose() {
     let _guard = TestEmitterGuard::install();
     let dir = TempDir::new().unwrap();
     let provider = Arc::new(TeamScriptProvider::new(
-        r#"{"reviewers":[{"name":"correctness","role":"correctness","scope":"full"}]}"#,
+        r#"{"subagents":[{"name":"correctness","role":"correctness","scope":"full"}]}"#,
     ));
 
     // max_tokens = 1: the compose call's tokens trip the meter before spawning.
@@ -258,7 +258,7 @@ async fn team_mode_uses_supplied_compose_prompt() {
 
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
     let provider = Arc::new(TeamScriptProvider::capturing(
-        r#"{"reviewers":[{"name":"correctness","role":"correctness","scope":"full"}]}"#,
+        r#"{"subagents":[{"name":"correctness","role":"correctness","scope":"full"}]}"#,
         tx,
     ));
 

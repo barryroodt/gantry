@@ -20,20 +20,25 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install pinned toolchain (mise)
-        uses: jdx/mise-action@v2
+      # Pin Rust to match mise.toml (keep the version in sync). dtolnay reliably
+      # installs the rustfmt + clippy components, which mise-action did not.
+      - name: Install Rust 1.96 + components
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.96.0"
+          components: rustfmt, clippy
 
       - name: Cargo cache
         uses: Swatinem/rust-cache@v2
 
       - name: Format
-        run: mise exec -- cargo fmt --check
+        run: cargo fmt --check
 
       - name: Build
-        run: mise exec -- cargo build --workspace --all-targets
+        run: cargo build --workspace --all-targets
 
       - name: Clippy
-        run: mise exec -- cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets -- -D warnings
 
       - name: Test
-        run: mise exec -- cargo test --workspace
+        run: cargo test --workspace
