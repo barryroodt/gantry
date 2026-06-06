@@ -32,13 +32,24 @@ jobs:
           command: check
           command-arguments: advisories bans sources
 
-      # Pin Rust to match mise.toml (keep the version in sync). dtolnay reliably
-      # installs the rustfmt + clippy components, which mise-action did not.
-      - name: Install Rust 1.96 + components
+      # Single source of truth: read the Rust version + components from mise.toml
+      # so CI and local dev can never drift (previously 1.96.0 was duplicated here).
+      - name: Read toolchain from mise.toml
+        id: rust
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import tomllib
+          t = tomllib.load(open("mise.toml", "rb"))["tools"]["rust"]
+          print(f"version={t['version']}")
+          print(f"components={t['components']}")
+          PY
+
+      # dtolnay reliably installs the components, which mise-action did not.
+      - name: Install Rust + components
         uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master, pinned by SHA
         with:
-          toolchain: "1.96.0"
-          components: rustfmt, clippy
+          toolchain: ${{ steps.rust.outputs.version }}
+          components: ${{ steps.rust.outputs.components }}
 
       - name: Cargo cache
         uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2.9.1

@@ -27,12 +27,11 @@ Priorities: **P1** active friction / correctness-adjacent · **P2** worth doing 
 
 ## Build & CI
 
-- [ ] **P2 — Rust version duplicated, no single source of truth.** `1.96.0` is pinned in
-  both `mise.toml` and `.github/workflows/ci.yml` (the latter added when CI switched off
-  `jdx/mise-action` to `dtolnay/rust-toolchain` for reliable `rustfmt`/`clippy`). Bumping
-  one and not the other re-introduces "green locally, red in CI." **Fix:** derive the CI
-  toolchain from a single source — have CI read `mise.toml`, or add a `rust-toolchain.toml`
-  that both mise and `dtolnay/rust-toolchain` honor.
+- [x] **P2 — Rust version duplicated, no single source of truth.** Done — CI now reads the
+  Rust version + components from `mise.toml` (a `tomllib` step feeding `dtolnay/rust-toolchain`
+  via `steps.rust.outputs`), so `mise.toml` is the single source and `1.96.0` is no longer
+  duplicated in `.github/workflows/ci.yml`. (`Cargo.toml`'s `rust-version` MSRV is a separate
+  floor, intentionally not coupled.)
 
 - [x] **P2 — Close the obsolete `mise-action` Dependabot PR.** Done — Dependabot
   auto-closed #2 when the CI rewrite (#5) removed `jdx/mise-action`.
