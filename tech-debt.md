@@ -9,14 +9,11 @@ Priorities: **P1** active friction / correctness-adjacent · **P2** worth doing 
 
 ## Code & design
 
-- [ ] **P2 — Vestigial `template` field on subagents.** `SpawnSubagentArgs.template`
-  (`src/tools/subagent.rs:47`, commented "template skill name") is never resolved to a
-  skill — it is only echoed into the `SubagentSpawn` NDJSON event and into the subagent's
-  first user turn (`Template: {template}`). `src/mode/team.rs` spawns with
-  `template: r.role.clone()`, so `template == role` (redundant and misleading). **Fix:**
-  either wire it to real template-skill resolution (let profiles set it), or remove the
-  field, the `Template:` prompt line, and the event field. Decide intentionally — the
-  field is part of the public NDJSON contract.
+- [x] **P2 — Vestigial `template` field on subagents.** Done — removed the field from
+  `SpawnSubagentArgs`, the `SubagentSpawn` NDJSON event, the `Template:` line in the
+  subagent's first user turn, and the team spawn site (it always equalled `role` and was
+  never resolved to a skill). README event table updated; `subagent_spawn` no longer carries
+  `template`.
 
 - [ ] **P3 — `structured_call` echoes the permissive unify schema as prose.**
   `src/mode/team.rs` injects "conforming to this schema: `{"type":"object"}`" into the
