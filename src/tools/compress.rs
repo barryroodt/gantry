@@ -71,11 +71,11 @@ pub(crate) fn compress(tool_name: &str, output: ToolOutput) -> CompressOutcome {
         // retrieved slices are byte-identical.
         let cap_input: String = lines.join("\n");
         let handle = crate::tools::retrieval::mint_handle(tool_name, &cap_input);
-        let content = render(&lines, output.bytes, true, trailing_nl, &handle);
+        let content = render(&lines, output.bytes, trailing_nl, Some(&handle));
         let original: Arc<str> = cap_input.into();
         (content, Some(Stash { handle, original }))
     } else {
-        let content = render(&lines, output.bytes, false, trailing_nl, "");
+        let content = render(&lines, output.bytes, trailing_nl, None);
         (content, None)
     };
 
@@ -141,24 +141,18 @@ fn push_run<'a>(out: &mut Vec<Cow<'a, str>>, line: &'a str, count: usize) {
     }
 }
 
-/// Render the (possibly deduped) lines back to a string, applying a head+tail cap
-/// with a recovery hint when `capped`.  `handle` is only used in the capped branch.
-fn render(
-    lines: &[Cow<str>],
-    raw_bytes: usize,
-    capped: bool,
-    trailing_nl: bool,
-    handle: &str,
-) -> String {
+/// Render the (possibly deduped) lines back to a string. With `cap = Some(handle)`,
+/// apply the head+tail cap and embed a recovery hint carrying `handle`.
+fn render(lines: &[Cow<str>], raw_bytes: usize, trailing_nl: bool, cap: Option<&str>) -> String {
     use std::fmt::Write as _;
     let mut s = String::new();
-    if !capped {
+    let Some(handle) = cap else {
         join_into(&mut s, lines);
         if trailing_nl {
             s.push('\n');
         }
         return s;
-    }
+    };
     let total = lines.len();
     let omitted = total.saturating_sub(HEAD_LINES + TAIL_LINES);
     join_into(&mut s, &lines[..HEAD_LINES]);
