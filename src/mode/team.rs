@@ -66,7 +66,6 @@ impl TeamMode {
                     SpawnSubagentArgs {
                         name: r.name.clone(),
                         role: r.role.clone(),
-                        template: r.role.clone(),
                         scope: r.scope.clone(),
                         extra_context: r.extra_context.clone(),
                     },

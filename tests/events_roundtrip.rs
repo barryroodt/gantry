@@ -79,7 +79,6 @@ fn subagent_spawn_roundtrip() {
     roundtrip(&GantryEvent::SubagentSpawn {
         ts: 6,
         name: "researcher".into(),
-        template: "generalPurpose".into(),
         scope: "search docs".into(),
     });
 }

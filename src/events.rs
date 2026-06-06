@@ -105,7 +105,6 @@ pub enum GantryEvent {
     SubagentSpawn {
         ts: u64,
         name: String,
-        template: String,
         scope: String,
     },
     SubagentDone {

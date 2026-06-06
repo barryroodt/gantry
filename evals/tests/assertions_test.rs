@@ -281,7 +281,6 @@ fn assert_subagent_lifecycle_pass_and_fail() {
     let spawn = |name: &str| GantryEvent::SubagentSpawn {
         ts: 1,
         name: name.into(),
-        template: "t".into(),
         scope: "full".into(),
     };
     let done = |name: &str| GantryEvent::SubagentDone {
