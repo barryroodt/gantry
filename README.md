@@ -155,7 +155,7 @@ Gantry emits one JSON object per line to **stdout**, each tagged with an `"event
 | `tool_call` | a tool is invoked | `role`, `turn`, `tool`, `args` |
 | `tool_result` | a tool returns | `tool`, `bytes`, `bytes_out`, `truncated`, `error?` |
 | `assistant_text` | model text output | `role`, `text` |
-| `subagent_spawn` | team subagent starts | `name`, `template`, `scope` |
+| `subagent_spawn` | team subagent starts | `name`, `scope` |
 | `subagent_done` | team subagent finishes | `name`, `turns`, `input_tokens`, `output_tokens` |
 | `subagent_failed` | team subagent errors | `name`, `reason` |
 | `iteration_start` / `iteration_end` | loop iteration boundaries | `iteration`, `stopped` |

@@ -115,7 +115,6 @@ async fn spawn_subagent(
             SpawnSubagentArgs {
                 name: name.into(),
                 role: role.into(),
-                template: role.into(),
                 scope: "full".into(),
                 extra_context: None,
             },
@@ -153,8 +152,8 @@ async fn spawn_subagent_adds_to_roster_and_emits_subagent_spawn() {
     let events = guard.drain_events();
     assert!(
         events.iter().any(
-            |e| matches!(e, GantryEvent::SubagentSpawn { name, template, scope, .. }
-                if name == "correctness" && template == "correctness" && scope == "full")
+            |e| matches!(e, GantryEvent::SubagentSpawn { name, scope, .. }
+                if name == "correctness" && scope == "full")
         ),
         "expected subagent_spawn event, got: {events:?}"
     );

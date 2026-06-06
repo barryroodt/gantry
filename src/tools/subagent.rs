@@ -43,8 +43,7 @@ fn build_subagent_system_prompt(
 #[derive(Debug, Deserialize, Serialize)]
 pub struct SpawnSubagentArgs {
     pub name: String,
-    pub role: String,     // "correctness" | "conventions" | etc.
-    pub template: String, // template skill name
+    pub role: String, // "correctness" | "conventions" | etc.
     pub scope: String,
     #[serde(default)]
     pub extra_context: Option<String>,
@@ -103,7 +102,6 @@ impl SubagentRoster {
         let _ = GantryEvent::SubagentSpawn {
             ts: now_ms(),
             name: name.clone(),
-            template: args.template.clone(),
             scope: args.scope.clone(),
         }
         .emit();
@@ -120,10 +118,9 @@ impl SubagentRoster {
             // First user turn carries the assignment; the "Role: " prefix stays so
             // the subagent's scope is explicit (and tests can detect a subagent turn).
             let mut messages: Vec<ChatMessage> = vec![ChatMessage::User(format!(
-                "Role: {role}\nScope: {scope}\nTemplate: {template}",
+                "Role: {role}\nScope: {scope}",
                 role = args.role,
                 scope = args.scope,
-                template = args.template,
             ))];
             let tools = registry.schemas();
             let mut round: u32 = 0;
