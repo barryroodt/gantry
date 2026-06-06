@@ -54,14 +54,11 @@ pub fn retrieve(store: &RetrievalStore, args: RetrieveArgs) -> Result<ToolOutput
         }
         set.into_iter().collect()
     } else if args.start.is_some() || args.end.is_some() {
-        // Slice mode: 1-based inclusive range, clamped to [1, len].
+        // Slice mode: 1-based inclusive range, clamped to [1, len]. An inverted
+        // range (start > end) collapses to empty and is reported by the
+        // post-selection empty guard below.
         let s = args.start.unwrap_or(1).max(1).min(len);
         let e = args.end.unwrap_or(len).max(1).min(len);
-        if s > e {
-            return Ok(crate::tools::truncate::truncated_output(
-                "[gantry: empty selection]".to_string(),
-            ));
-        }
         (s..=e).collect()
     } else {
         // No args: return the elided middle that compress omitted.
@@ -75,6 +72,14 @@ pub fn retrieve(store: &RetrievalStore, args: RetrieveArgs) -> Result<ToolOutput
         let middle_end = len - TAIL_LINES;
         (middle_start..=middle_end).collect()
     };
+
+    if selected.is_empty() {
+        let note = match &args.pattern {
+            Some(p) => format!("[gantry: no lines matched pattern '{p}']"),
+            None => "[gantry: empty selection]".to_string(),
+        };
+        return Ok(crate::tools::truncate::truncated_output(note));
+    }
 
     let joined = selected.iter().map(|&i| lines[i - 1]).collect::<Vec<_>>().join("\n");
 
@@ -178,5 +183,22 @@ mod tests {
         let content = &output.content;
         assert_eq!(content.lines().next().unwrap(), "line595");
         assert_eq!(content.lines().last().unwrap(), "line600");
+    }
+
+    #[test]
+    fn pattern_no_match_returns_note() {
+        let (store, handle) = make_store_600();
+        let args = RetrieveArgs {
+            handle,
+            start: None,
+            end: None,
+            pattern: Some("nonexistent_token".to_string()),
+        };
+        let output = retrieve(&store, args).unwrap();
+        assert!(
+            output.content.contains("no lines matched pattern"),
+            "expected no-match note, got: {}",
+            output.content
+        );
     }
 }

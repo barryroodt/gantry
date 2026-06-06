@@ -29,8 +29,10 @@ const DEDUP_RUN: usize = 5;
 /// be retrieved. Only produced when the head+tail cap actually elided lines.
 pub(crate) struct Stash {
     pub handle: String,
-    /// The exact byte sequence that was sliced by the cap (post-dedup for noisy
-    /// tools, raw lines otherwise). Retrieved slices are byte-identical to this.
+    /// The line sequence the cap sliced (post-dedup for noisy tools, raw lines
+    /// otherwise), joined by `\n`. Retrieved slices are byte-identical to this —
+    /// i.e. to the content the model was shown (`str::lines()` drops a trailing
+    /// `\r`, so CRLF input is LF-normalized here and in what the model sees).
     pub original: Arc<str>,
 }
 
@@ -145,6 +147,7 @@ fn render(
     trailing_nl: bool,
     handle: &str,
 ) -> String {
+    use std::fmt::Write as _;
     let mut s = String::new();
     if !capped {
         join_into(&mut s, lines);
@@ -157,9 +160,10 @@ fn render(
     let omitted = total.saturating_sub(HEAD_LINES + TAIL_LINES);
     join_into(&mut s, &lines[..HEAD_LINES]);
     s.push('\n');
-    s.push_str(&format!(
+    let _ = write!(
+        s,
         "[gantry: {omitted} lines omitted ({raw_bytes} bytes raw); retrieve(handle=\"{handle}\") for the elided middle — add start/end or pattern to slice]"
-    ));
+    );
     s.push('\n');
     join_into(&mut s, &lines[total - TAIL_LINES..]);
     if trailing_nl {

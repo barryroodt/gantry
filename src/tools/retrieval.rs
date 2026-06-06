@@ -34,11 +34,12 @@ impl RetrievalStore {
     /// Store `original` under `handle`.  Idempotent: if `handle` is already
     /// present the existing value is kept and no allocation occurs.
     pub fn insert(&self, handle: &str, original: Arc<str>) {
-        self.inner
-            .lock()
-            .expect("RetrievalStore mutex poisoned")
-            .entry(handle.to_owned())
-            .or_insert(original);
+        let mut guard = self.inner.lock().expect("RetrievalStore mutex poisoned");
+        // Allocate the owned key only on a real insert — the already-present
+        // path is a true no-op (content-addressed handles ⇒ identical content).
+        if !guard.contains_key(handle) {
+            guard.insert(handle.to_owned(), original);
+        }
     }
 
     /// Return a clone of the `Arc` stored under `handle`, or `None` if absent.
