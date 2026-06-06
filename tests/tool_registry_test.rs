@@ -413,7 +413,9 @@ async fn capped_output_stores_and_emits_handle() {
     let GantryEvent::ToolResult { handle, .. } = &events[1] else {
         panic!("expected tool_result at index 1, got {:?}", events[1]);
     };
-    let h = handle.as_deref().expect("tool_result should have a handle when output was capped");
+    let h = handle
+        .as_deref()
+        .expect("tool_result should have a handle when output was capped");
     assert!(
         h.starts_with("read_file/"),
         "handle should be namespaced by tool: {h}"
@@ -421,7 +423,9 @@ async fn capped_output_stores_and_emits_handle() {
 
     // retrieve without range args returns the elided middle (lines 401-500).
     let retrieve_args = serde_json::json!({"handle": h}).to_string();
-    let retrieved = registry.dispatch("single", 1, "retrieve", &retrieve_args).await;
+    let retrieved = registry
+        .dispatch("single", 1, "retrieve", &retrieve_args)
+        .await;
     assert!(
         retrieved.content.contains("line401"),
         "elided middle should contain line401: {}",

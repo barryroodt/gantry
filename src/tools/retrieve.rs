@@ -81,7 +81,11 @@ pub fn retrieve(store: &RetrievalStore, args: RetrieveArgs) -> Result<ToolOutput
         return Ok(crate::tools::truncate::truncated_output(note));
     }
 
-    let joined = selected.iter().map(|&i| lines[i - 1]).collect::<Vec<_>>().join("\n");
+    let joined = selected
+        .iter()
+        .map(|&i| lines[i - 1])
+        .collect::<Vec<_>>()
+        .join("\n");
 
     Ok(crate::tools::truncate::truncated_output(joined))
 }
@@ -106,7 +110,12 @@ mod tests {
     #[test]
     fn no_args_returns_elided_middle() {
         let (store, handle) = make_store_600();
-        let args = RetrieveArgs { handle, start: None, end: None, pattern: None };
+        let args = RetrieveArgs {
+            handle,
+            start: None,
+            end: None,
+            pattern: None,
+        };
         let output = retrieve(&store, args).unwrap();
         let content = &output.content;
         // HEAD_LINES=400, TAIL_LINES=100 → elided middle is lines 401..=500
@@ -117,7 +126,12 @@ mod tests {
     #[test]
     fn start_end_range() {
         let (store, handle) = make_store_600();
-        let args = RetrieveArgs { handle, start: Some(10), end: Some(12), pattern: None };
+        let args = RetrieveArgs {
+            handle,
+            start: Some(10),
+            end: Some(12),
+            pattern: None,
+        };
         let output = retrieve(&store, args).unwrap();
         assert_eq!(output.content, "line10\nline11\nline12");
     }

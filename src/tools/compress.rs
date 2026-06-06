@@ -51,7 +51,10 @@ pub(crate) fn compress(tool_name: &str, output: ToolOutput) -> CompressOutcome {
     let needs_dedup = NOISY_TOOLS.contains(&tool_name) && has_dup_run(&output.content);
     let needs_cap = output.content.lines().count() > HEAD_LINES + TAIL_LINES;
     if !needs_dedup && !needs_cap {
-        return CompressOutcome { output, stash: None };
+        return CompressOutcome {
+            output,
+            stash: None,
+        };
     }
 
     let trailing_nl = output.content.ends_with('\n');
@@ -212,14 +215,20 @@ mod tests {
         assert!(co.output.content.contains("line1"), "head kept");
         assert!(co.output.content.contains("line400"), "last head line kept");
         assert!(co.output.content.contains("line600"), "tail kept");
-        assert!(co.output.content.contains("line501"), "first tail line kept");
+        assert!(
+            co.output.content.contains("line501"),
+            "first tail line kept"
+        );
         assert!(!co.output.content.contains("line450"), "middle omitted");
         assert!(
             co.output.content.contains("100 lines omitted"),
             "accurate omitted count: {}",
             co.output.content
         );
-        assert!(co.output.content.contains("bytes raw"), "raw byte hint present");
+        assert!(
+            co.output.content.contains("bytes raw"),
+            "raw byte hint present"
+        );
         assert!(
             co.output.content.contains("retrieve(handle=\""),
             "handle embedded in hint"
@@ -291,12 +300,17 @@ mod tests {
 
         // Original == the raw line sequence (git_diff is non-noisy, so no dedup).
         let expected_original: String = content.lines().collect::<Vec<_>>().join("\n");
-        assert_eq!(&*stash.original, expected_original, "original is the cap input");
+        assert_eq!(
+            &*stash.original, expected_original,
+            "original is the cap input"
+        );
 
         // Handle is deterministic for the same (tool, content) pair.
-        let expected_handle =
-            crate::tools::retrieval::mint_handle("git_diff", &expected_original);
-        assert_eq!(stash.handle, expected_handle, "handle is mint_handle output");
+        let expected_handle = crate::tools::retrieval::mint_handle("git_diff", &expected_original);
+        assert_eq!(
+            stash.handle, expected_handle,
+            "handle is mint_handle output"
+        );
     }
 
     /// Shell input with a ≥5 identical-line run but total deduped lines ≤500:
