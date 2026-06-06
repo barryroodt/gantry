@@ -60,6 +60,8 @@ Priorities: **P1** active friction / correctness-adjacent · **P2** worth doing 
   `HEAD_LINES=400`, `TAIL_LINES=100`, `DEDUP_RUN=5`, `NOISY_TOOLS=["shell"]`. Fine as
   defaults; expose via flag/profile only when a consumer actually needs different limits.
 
+- [ ] **P3 — `RetrievalStore` has no eviction.** `src/tools/retrieval.rs`: the per-run store grows unbounded as tool outputs are stashed for retrieval. Fine in practice — runs are bounded by token budget and turn cap — but a size-capped LRU would protect against a long team session with many large capped outputs. Add eviction only if memory pressure is observed.
+
 - [ ] **P3 — Optional harness-side unify validation (deferred, ADR-0011).** The unify
   output schema is permissive by design (the profile owns shape). If a consumer wants the
   harness to validate unify output, add an optional profile-supplied JSON-schema field.
