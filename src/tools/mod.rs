@@ -9,6 +9,7 @@ pub mod list_files;
 pub mod read_file;
 pub mod registry;
 pub mod retrieval;
+pub mod retrieve;
 pub mod shell;
 pub mod skill_load;
 pub mod subagent;
