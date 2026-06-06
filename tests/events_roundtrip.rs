@@ -61,6 +61,7 @@ fn tool_result_roundtrip() {
         bytes_out: 256,
         truncated: false,
         error: None,
+        handle: Some("read_file/abc123".into()),
     });
     roundtrip(&GantryEvent::ToolResult {
         ts: 5,
@@ -71,6 +72,7 @@ fn tool_result_roundtrip() {
         bytes_out: 0,
         truncated: false,
         error: Some("command failed".into()),
+        handle: None,
     });
 }
 

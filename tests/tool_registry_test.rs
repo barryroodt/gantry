@@ -4,7 +4,7 @@ use gantry::tools::ToolRegistry;
 use gantry_evals::assertions::assert_tool_call_pairing;
 use tempfile::TempDir;
 
-const EXPECTED_TOOL_NAMES: [&str; 7] = [
+const EXPECTED_TOOL_NAMES: [&str; 8] = [
     "read_file",
     "list_files",
     "find_files",
@@ -12,6 +12,7 @@ const EXPECTED_TOOL_NAMES: [&str; 7] = [
     "ast_grep",
     "shell",
     "skill_load",
+    "retrieve",
 ];
 
 #[test]
@@ -19,7 +20,7 @@ fn schemas_returns_default_tool_names() {
     let registry = ToolRegistry::new(std::env::temp_dir(), vec![]);
     let schemas = registry.schemas();
 
-    assert_eq!(schemas.len(), 7);
+    assert_eq!(schemas.len(), 8);
     let names: Vec<&str> = schemas.iter().map(|schema| schema.name.as_str()).collect();
     assert_eq!(names, EXPECTED_TOOL_NAMES);
 }
@@ -150,7 +151,9 @@ fn base_tool_names_const_matches_schemas() {
     let registry = ToolRegistry::new(std::env::temp_dir(), vec![]);
     let schemas = registry.schemas();
     let names: Vec<&str> = schemas.iter().map(|s| s.name.as_str()).collect();
-    assert_eq!(names, BASE_TOOL_NAMES);
+    // base tools come first; retrieve is always appended (seeded in control).
+    assert_eq!(&names[..BASE_TOOL_NAMES.len()], BASE_TOOL_NAMES);
+    assert_eq!(names.last(), Some(&"retrieve"));
     let expected: Vec<&str> = BASE_TOOL_NAMES
         .iter()
         .chain(OPTIN_TOOL_NAMES.iter())
@@ -167,7 +170,7 @@ fn allowlist_filters_exposed_schemas() {
     );
     let schemas = registry.schemas();
     let names: Vec<&str> = schemas.iter().map(|s| s.name.as_str()).collect();
-    assert_eq!(names, ["read_file", "git_diff"]);
+    assert_eq!(names, ["read_file", "git_diff", "retrieve"]);
 }
 
 #[tokio::test]
@@ -387,4 +390,118 @@ async fn dispatch_compresses_verbose_output_and_reports_bytes_out() {
     };
     assert!(*bytes_out < *bytes, "bytes_out {bytes_out} < bytes {bytes}");
     assert_eq!(*bytes_out, out.content.len() as u64);
+}
+
+#[tokio::test]
+async fn capped_output_stores_and_emits_handle() {
+    let dir = TempDir::new().unwrap();
+    let big = (1..=600)
+        .map(|i| format!("line{i}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let file_path = dir.path().join("big.txt");
+    std::fs::write(&file_path, &big).unwrap();
+
+    let guard = TestEmitterGuard::install();
+    let registry = ToolRegistry::new(dir.path().to_path_buf(), vec![]);
+    let _out = registry
+        .dispatch("single", 0, "read_file", r#"{"path":"big.txt"}"#)
+        .await;
+
+    // tool_result event should carry a handle pointing into the store.
+    let events = guard.drain_events();
+    let GantryEvent::ToolResult { handle, .. } = &events[1] else {
+        panic!("expected tool_result at index 1, got {:?}", events[1]);
+    };
+    let h = handle
+        .as_deref()
+        .expect("tool_result should have a handle when output was capped");
+    assert!(
+        h.starts_with("read_file/"),
+        "handle should be namespaced by tool: {h}"
+    );
+
+    // retrieve without range args returns the elided middle (lines 401-500).
+    let retrieve_args = serde_json::json!({"handle": h}).to_string();
+    let retrieved = registry
+        .dispatch("single", 1, "retrieve", &retrieve_args)
+        .await;
+    assert!(
+        retrieved.content.contains("line401"),
+        "elided middle should contain line401: {}",
+        retrieved.content
+    );
+    assert!(
+        retrieved.content.contains("line500"),
+        "elided middle should contain line500: {}",
+        retrieved.content
+    );
+    assert!(
+        !retrieved.content.contains("line1\n"),
+        "head lines must not appear in retrieved middle: {}",
+        retrieved.content
+    );
+}
+
+#[test]
+fn retrieve_always_available_under_restrictive_allow() {
+    let dir = TempDir::new().unwrap();
+    let registry = ToolRegistry::new(dir.path().to_path_buf(), vec!["read_file".to_string()]);
+    let schemas = registry.schemas();
+    let names: Vec<&str> = schemas.iter().map(|s| s.name.as_str()).collect();
+    assert!(
+        names.contains(&"retrieve"),
+        "retrieve must be in schemas even with restrictive allow: {names:?}"
+    );
+}
+
+#[tokio::test]
+async fn retrieve_with_restrictive_allow_is_not_unknown_tool() {
+    let dir = TempDir::new().unwrap();
+    let _guard = TestEmitterGuard::install();
+    let registry = ToolRegistry::new(dir.path().to_path_buf(), vec!["read_file".to_string()]);
+    // unknown handle → InvalidInput, NOT UnknownTool.
+    let out = registry
+        .dispatch(
+            "single",
+            0,
+            "retrieve",
+            &serde_json::json!({"handle": "read_file/deadbeef"}).to_string(),
+        )
+        .await;
+    assert!(
+        !out.content.contains("unknown tool"),
+        "retrieve must not return UnknownTool: {}",
+        out.content
+    );
+}
+
+#[tokio::test]
+async fn unknown_retrieve_handle_is_non_fatal() {
+    let dir = TempDir::new().unwrap();
+    let guard = TestEmitterGuard::install();
+    let registry = ToolRegistry::new(dir.path().to_path_buf(), vec![]);
+    let out = registry
+        .dispatch(
+            "single",
+            0,
+            "retrieve",
+            &serde_json::json!({"handle": "read_file/deadbeef"}).to_string(),
+        )
+        .await;
+
+    assert!(
+        out.content.starts_with("error:"),
+        "unknown handle should produce error content: {}",
+        out.content
+    );
+
+    let events = guard.drain_events();
+    let GantryEvent::ToolResult { error, .. } = &events[1] else {
+        panic!("expected tool_result at index 1, got {:?}", events[1]);
+    };
+    assert!(
+        error.is_some(),
+        "tool_result.error should be Some for unknown handle"
+    );
 }

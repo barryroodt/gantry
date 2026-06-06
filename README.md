@@ -108,6 +108,7 @@ Tools are workdir-confined. The exposed set is controlled by `--tool` / a profil
 | `edit_file` | opt-in | Literal, occurrence-count-guarded search/replace. **Mutating.** |
 | `ast_edit` | opt-in | Structural (AST) rewrite across files. **Mutating.** |
 | `decide_stop` | control | Signal the iterative loop to stop (loop mode only; harness-granted). |
+| `retrieve` | control | Recover content elided by output compression, by its `handle` (from a prior `tool_result`). Harness-granted; always available. |
 
 **Allowlist model:** base tools are on by default and can be narrowed with `--tool`. **Opt-in (mutating) tools are off unless named explicitly** (`--tool write_file …` or a profile). **Control tools** (`decide_stop`) are granted by the mode, never requestable via `--tool`.
 
@@ -141,7 +142,7 @@ Explicit CLI flags override profile values. Two worked examples ship in-tree:
 
 ## Output compression
 
-To keep context tight, every tool result passes through a compressor at the dispatch boundary before reaching the model: a recoverable **head+tail line cap** with a machine-readable hint (retained lines are byte-identical — never a heuristic drop), plus consecutive-line **dedup** for high-volume, non-faithful tools (`shell`). Faithful content (`read_file`, `git_diff`, …) is never deduped. Each `tool_result` reports `bytes` (raw) and `bytes_out` (emitted). See [ADR-0009](docs/decisions/0009-sp5-output-compression.md).
+To keep context tight, every tool result passes through a compressor at the dispatch boundary before reaching the model: a recoverable **head+tail line cap** with a machine-readable hint (retained lines are byte-identical — never a heuristic drop), plus consecutive-line **dedup** for high-volume, non-faithful tools (`shell`). Faithful content (`read_file`, `git_diff`, …) is never deduped. Each `tool_result` reports `bytes` (raw) and `bytes_out` (emitted). The cap is now reversible: when output is capped, gantry stashes the byte-exact cap input under a content-addressed handle (surfaced in the recovery hint and as the additive `tool_result.handle` field), and the always-on `retrieve` control tool returns byte-faithful slices — by default the elided middle, or a 1-based inclusive `start`/`end` range, or a regex `pattern`. This reverses the compression cap only, not the tool's 256 KiB hard cap. See [ADR-0009](docs/decisions/0009-sp5-output-compression.md), [ADR-0012](docs/decisions/0012-sp7-reversible-retrieval.md).
 
 ## Event stream (NDJSON)
 
@@ -153,7 +154,7 @@ Gantry emits one JSON object per line to **stdout**, each tagged with an `"event
 | `skill_loaded` | a skill is injected | `name`, `bytes` |
 | `agent_turn` | each model call | `role`, `turn`, `input_tokens`, `output_tokens`, `cache_read`, `cache_write` |
 | `tool_call` | a tool is invoked | `role`, `turn`, `tool`, `args` |
-| `tool_result` | a tool returns | `tool`, `bytes`, `bytes_out`, `truncated`, `error?` |
+| `tool_result` | a tool returns | `tool`, `bytes`, `bytes_out`, `truncated`, `handle?`, `error?` |
 | `assistant_text` | model text output | `role`, `text` |
 | `subagent_spawn` | team subagent starts | `name`, `scope` |
 | `subagent_done` | team subagent finishes | `name`, `turns`, `input_tokens`, `output_tokens` |
