@@ -244,6 +244,7 @@ fn assert_tool_call_pairing_pass_and_fail() {
             bytes_out: 10,
             truncated: false,
             error: None,
+            handle: None,
         },
     ];
     assert!(assert_tool_call_pairing(&pass_events).is_ok());

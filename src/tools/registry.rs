@@ -225,6 +225,7 @@ impl ToolRegistry {
             bytes_out: output.content.len() as u64,
             truncated: output.truncated,
             error,
+            handle: None,
         }
         .emit();
         output

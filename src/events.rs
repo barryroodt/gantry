@@ -101,6 +101,8 @@ pub enum GantryEvent {
         truncated: bool,
         #[serde(skip_serializing_if = "Option::is_none")]
         error: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        handle: Option<String>,
     },
     SubagentSpawn {
         ts: u64,
