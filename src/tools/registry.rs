@@ -1,7 +1,9 @@
 use super::{
-    ast_edit, ast_grep, decide_stop, edit_file, find_files, git_diff, list_files, read_file, shell,
-    skill_load, write_file, ToolError, ToolOutput,
+    ast_edit, ast_grep, decide_stop, edit_file, find_files, git_diff, list_files, read_file,
+    retrieve, shell, skill_load, write_file, ToolError, ToolOutput,
 };
+use super::compress::CompressOutcome;
+use super::retrieval::RetrievalStore;
 use crate::events::{now_ms, truncate_args, GantryEvent};
 use crate::provider::ToolSchema;
 use std::path::PathBuf;
@@ -40,6 +42,7 @@ pub struct ToolRegistry {
     allow: Vec<String>,
     shell_allow: Vec<String>,
     control: Vec<String>,
+    store: RetrievalStore,
 }
 
 impl ToolRegistry {
@@ -51,7 +54,8 @@ impl ToolRegistry {
                 .iter()
                 .map(|s| (*s).to_string())
                 .collect(),
-            control: Vec::new(),
+            control: vec![retrieve::RETRIEVE.to_string()],
+            store: RetrievalStore::new(),
         }
     }
 
@@ -145,11 +149,18 @@ impl ToolRegistry {
     /// Control-tool schemas (e.g. `decide_stop`) — surfaced only when the loop
     /// registry grants them explicitly.
     fn control_schemas() -> Vec<ToolSchema> {
-        vec![ToolSchema {
-            name: decide_stop::DECIDE_STOP.into(),
-            description: "Stop the iterative loop after this pass (loop mode only).".into(),
-            json_schema: serde_json::json!({"type":"object","properties":{"reason":{"type":"string"}}}),
-        }]
+        vec![
+            ToolSchema {
+                name: decide_stop::DECIDE_STOP.into(),
+                description: "Stop the iterative loop after this pass (loop mode only).".into(),
+                json_schema: serde_json::json!({"type":"object","properties":{"reason":{"type":"string"}}}),
+            },
+            ToolSchema {
+                name: retrieve::RETRIEVE.into(),
+                description: "Recover elided content from a prior compressed tool_result by its handle (shown in the tool_result hint). Omit start/end/pattern for the elided middle; or pass a 1-based inclusive start/end line range; or a regex `pattern` (returns matching lines + context).".into(),
+                json_schema: serde_json::json!({"type":"object","properties":{"handle":{"type":"string"},"start":{"type":"integer"},"end":{"type":"integer"},"pattern":{"type":"string"}},"required":["handle"]}),
+            },
+        ]
     }
 
     /// Every tool schema (base ++ opt-in ++ control), unfiltered.
@@ -214,7 +225,14 @@ impl ToolRegistry {
         };
 
         // SP5: structured, recoverable compression at the tool-result boundary.
-        let output = super::compress::compress(name, output);
+        let CompressOutcome { output, stash } = super::compress::compress(name, output);
+        let handle = match stash {
+            Some(s) => {
+                self.store.insert(&s.handle, s.original);
+                Some(s.handle)
+            }
+            None => None,
+        };
 
         let _ = GantryEvent::ToolResult {
             ts: now_ms(),
@@ -225,7 +243,7 @@ impl ToolRegistry {
             bytes_out: output.content.len() as u64,
             truncated: output.truncated,
             error,
-            handle: None,
+            handle,
         }
         .emit();
         output
@@ -291,6 +309,11 @@ impl ToolRegistry {
                 let args: decide_stop::DecideStopArgs = serde_json::from_str(args_json)
                     .map_err(|e| ToolError::InvalidInput(e.to_string()))?;
                 decide_stop::decide_stop(args).await
+            }
+            "retrieve" => {
+                let args: retrieve::RetrieveArgs = serde_json::from_str(args_json)
+                    .map_err(|e| ToolError::InvalidInput(e.to_string()))?;
+                retrieve::retrieve(&self.store, args)
             }
             other => Err(ToolError::UnknownTool(other.into())),
         }
