@@ -84,6 +84,13 @@ pub enum GantryEvent {
         cache_read: u64,
         cache_write: u64,
     },
+    HistoryCompacted {
+        ts: u64,
+        role: String,
+        turn: u32,
+        results_elided: u32,
+        input_tokens: u64,
+    },
     ToolCall {
         ts: u64,
         role: String,
