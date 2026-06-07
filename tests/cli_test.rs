@@ -31,6 +31,7 @@ fn base_cli(workdir: &Path, prompt_file: &Path) -> Cli {
         profile: None,
         isolate: false,
         max_iterations: None,
+        context_limit: None,
     }
 }
 

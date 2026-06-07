@@ -65,6 +65,12 @@ pub struct Cli {
     /// `max_iterations`. Ignored in single/team modes.
     #[arg(long = "max-iterations", value_name = "N")]
     pub max_iterations: Option<u32>,
+
+    /// Compact old tool results out of the transcript once the previous turn's
+    /// input tokens exceed this many tokens (opt-in; recoverable via the retrieve tool).
+    /// Off by default. Useful to keep long runs under the model's context window.
+    #[arg(long = "context-limit", value_name = "TOKENS")]
+    pub context_limit: Option<u64>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, ValueEnum, Deserialize)]
@@ -180,6 +186,7 @@ pub struct Validated {
     pub shell_allow: Vec<String>,
     pub isolate: bool,
     pub max_iterations: u32,
+    pub context_limit: Option<u64>,
 }
 
 impl Cli {
@@ -301,6 +308,7 @@ impl Cli {
             shell_allow,
             isolate,
             max_iterations,
+            context_limit: self.context_limit,
         })
     }
 
