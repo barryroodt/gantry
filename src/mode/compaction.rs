@@ -1,11 +1,12 @@
 //! Transcript compaction: fold old tool results into the [`RetrievalStore`] to
-//! free context-window headroom while keeping them losslessly recoverable via
-//! the `retrieve` tool.
+//! free context-window headroom while keeping them recoverable via the
+//! `retrieve` tool (line-faithful: a trailing newline / CRLF is normalized on read).
 
 use std::sync::Arc;
 
 use crate::provider::ChatMessage;
 use crate::tools::retrieval::{mint_handle, RetrievalStore};
+use crate::events::{now_ms, GantryEvent};
 
 /// Number of most-recent `ToolResults` turns to leave untouched.
 pub(crate) const KEEP_RECENT_TURNS: usize = 3;
@@ -67,13 +68,41 @@ pub(crate) fn compact_history(
                 store.insert(&handle, Arc::from(r.content.as_str()));
                 r.content = format!(
                     "[gantry: tool result ({n_lines} lines) elided to free context; \
-                     retrieve(handle=\"{handle}\", start=1) to recover in full]"
+                     retrieve(handle=\"{handle}\", start=1) to recover the elided lines]"
                 );
                 count += 1;
             }
         }
     }
     count
+}
+
+/// Run [`compact_history`] when a `context_limit` is set and the previous turn's
+/// `input_tokens` exceeded it, emitting `HistoryCompacted` if anything was elided.
+/// The opt-in + threshold policy lives here so the agent loop body stays focused.
+pub(crate) fn maybe_compact_history(
+    messages: &mut [ChatMessage],
+    store: &RetrievalStore,
+    context_limit: Option<u64>,
+    input_tokens: u64,
+    role: &str,
+    turn: u32,
+) {
+    let Some(limit) = context_limit else { return };
+    if input_tokens <= limit {
+        return;
+    }
+    let elided = compact_history(messages, store, KEEP_RECENT_TURNS);
+    if elided > 0 {
+        let _ = GantryEvent::HistoryCompacted {
+            ts: now_ms(),
+            role: role.into(),
+            turn,
+            results_elided: elided,
+            input_tokens,
+        }
+        .emit();
+    }
 }
 
 #[cfg(test)]

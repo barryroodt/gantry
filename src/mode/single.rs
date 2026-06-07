@@ -208,25 +208,14 @@ pub(crate) async fn run_agent_pass(
         messages.push(ChatMessage::ToolResults(tool_results));
         turn += 1;
 
-        if let Some(limit) = context_limit {
-            if input_tokens > limit {
-                let elided = crate::mode::compaction::compact_history(
-                    &mut messages,
-                    registry.retrieval_store(),
-                    crate::mode::compaction::KEEP_RECENT_TURNS,
-                );
-                if elided > 0 {
-                    let _ = GantryEvent::HistoryCompacted {
-                        ts: now_ms(),
-                        role: role.into(),
-                        turn,
-                        results_elided: elided,
-                        input_tokens,
-                    }
-                    .emit();
-                }
-            }
-        }
+        crate::mode::compaction::maybe_compact_history(
+            &mut messages,
+            registry.retrieval_store(),
+            context_limit,
+            input_tokens,
+            role,
+            turn,
+        );
     }
 
     PassResult {
