@@ -67,6 +67,14 @@ Priorities: **P1** active friction / correctness-adjacent · **P2** worth doing 
   harness to validate unify output, add an optional profile-supplied JSON-schema field.
   Do not build it speculatively.
 
+- [ ] **P3 — Extend compaction to the subagent tool-loop (ADR-0013, deferred).** `src/mode/single.rs`'s `compact_history` helper is available but not wired into the team-mode subagent dispatch path. Wire it via the shared `run_agent_pass` call site once the subagent loop is profiled and context pressure is observed there.
+
+- [ ] **P3 — OI-1: `--keep-recent-turns` flag (ADR-0013).** `KEEP_RECENT_TURNS = 3` is a compile-time constant in `src/mode/compaction.rs`. A CLI / profile knob is a trivial follow-up; add only when a consumer needs a different recency window.
+
+- [ ] **P3 — OI-2: deduplicate re-stash of ADR-0012-capped results (ADR-0013).** A `ToolResult` already shortened by the output compressor (ADR-0009) carries a recovery hint; `compact_history` stubs it again, storing the hint text rather than the original content. Detect the existing stub marker and skip re-stashing (or store the inner handle instead).
+
+- [ ] **P3 — NIT-4: loop-mode `RetrievalStore` retains stub-orphaned blobs across iterations (ADR-0013).** In `--mode loop`, stubs written during iteration N persist into iteration N+1 even though no in-history handle still points at them. Memory is bounded by `--max-iterations` × results-per-iteration; consider per-iteration store scoping if memory pressure is observed.
+
 ## Security & repo ops
 
 - [ ] **P2 — Rotate the old Cursor API key.** Never committed (only a placeholder

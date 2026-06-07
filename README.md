@@ -74,6 +74,7 @@ Each line of stdout is one JSON event; the final `result` event carries the exit
 | `--inject-skill <name>` | no | Inject `<workdir>/.claude/skills/<name>/SKILL.md` into the system prompt (repeatable). |
 | `--isolate` | no | Run against a copy-on-write shadow of the workdir (see [Isolation](#isolation)). |
 | `--max-iterations <n>` | no | Iteration cap for `--mode loop` (default 5, min 1). |
+| `--context-limit <TOKENS>` | no | Opt-in transcript compaction threshold. When the previous turn's `input_tokens` exceed this value, tool results older than the last 3 turns (>512 B, not already a stub) are folded into `retrieve`-able stubs to free context-window headroom. Off by default; single and loop modes only (no effect in team mode). |
 
 ### Providers
 
@@ -160,6 +161,7 @@ Gantry emits one JSON object per line to **stdout**, each tagged with an `"event
 | `subagent_done` | team subagent finishes | `name`, `turns`, `input_tokens`, `output_tokens` |
 | `subagent_failed` | team subagent errors | `name`, `reason` |
 | `iteration_start` / `iteration_end` | loop iteration boundaries | `iteration`, `stopped` |
+| `history_compacted` | transcript compaction ran | `role`, `turn`, `results_elided`, `input_tokens` |
 | `budget_exceeded` | token budget tripped | `limit`, `total` |
 | `changes` | `--isolate` teardown | `files: [{path, kind}]` |
 | `error` | recoverable/terminal error | `kind` (`config`/`provider`/`team_collapse`/`internal`), `message` |
