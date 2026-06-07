@@ -4,9 +4,9 @@
 
 use std::sync::Arc;
 
+use crate::events::{now_ms, GantryEvent};
 use crate::provider::ChatMessage;
 use crate::tools::retrieval::{mint_handle, RetrievalStore};
-use crate::events::{now_ms, GantryEvent};
 
 /// Number of most-recent `ToolResults` turns to leave untouched.
 pub(crate) const KEEP_RECENT_TURNS: usize = 3;
@@ -108,7 +108,7 @@ pub(crate) fn maybe_compact_history(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::provider::{ToolResult};
+    use crate::provider::ToolResult;
     use crate::tools::retrieval::RetrievalStore;
 
     fn big_content() -> String {
@@ -159,7 +159,11 @@ mod tests {
 
         let tr = tool_results(&msgs);
         for r in &tr[..3] {
-            assert!(r[0].content.starts_with(STUB_PREFIX), "expected stub, got: {}", r[0].content);
+            assert!(
+                r[0].content.starts_with(STUB_PREFIX),
+                "expected stub, got: {}",
+                r[0].content
+            );
         }
         for r in &tr[3..] {
             assert_eq!(r[0].content, big_content(), "recent turn must be untouched");
@@ -244,10 +248,18 @@ mod tests {
         let stub = stub.expect("one stub must exist");
 
         // Extract handle between `handle="` and the closing `"`
-        let after_key = stub.split("handle=\"").nth(1).expect("handle= present in stub");
-        let handle = after_key.split('"').next().expect("closing quote after handle");
+        let after_key = stub
+            .split("handle=\"")
+            .nth(1)
+            .expect("handle= present in stub");
+        let handle = after_key
+            .split('"')
+            .next()
+            .expect("closing quote after handle");
 
-        let recovered = store.get(handle).expect("original must be in store under handle");
+        let recovered = store
+            .get(handle)
+            .expect("original must be in store under handle");
         assert_eq!(recovered.as_ref(), content.as_str());
     }
 
@@ -256,7 +268,10 @@ mod tests {
         let store = RetrievalStore::new();
         let mut msgs = make_messages(2, &big_content());
         let count = compact_history(&mut msgs, &store, 3);
-        assert_eq!(count, 0, "fewer turns than keep_recent_turns: nothing to compact");
+        assert_eq!(
+            count, 0,
+            "fewer turns than keep_recent_turns: nothing to compact"
+        );
     }
 
     #[test]
