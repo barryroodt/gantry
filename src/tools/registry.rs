@@ -59,6 +59,11 @@ impl ToolRegistry {
         }
     }
 
+    /// Returns a reference to the underlying [`RetrievalStore`] used by this registry.
+    pub(crate) fn retrieval_store(&self) -> &RetrievalStore {
+        &self.store
+    }
+
     /// Override the shell program allowlist (from a profile's `shell_allow`).
     /// Empty input keeps the default read-only set.
     #[must_use]
