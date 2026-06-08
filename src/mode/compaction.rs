@@ -15,7 +15,9 @@ pub(crate) const KEEP_RECENT_TURNS: usize = 3;
 /// not worth eliding.
 const MIN_COMPACT_BYTES: usize = 512;
 
-/// Prefix that identifies an already-compacted stub; used to ensure idempotency.
+/// Idempotency marker: the literal leading text of every stub built by
+/// `compact_history`, used to skip already-compacted results. The stub format
+/// string starts with this constant so the two cannot drift apart.
 const STUB_PREFIX: &str = "[gantry: tool result";
 
 /// Compact old tool results in `messages` by replacing their content with a
@@ -67,7 +69,7 @@ pub(crate) fn compact_history(
                 let handle = mint_handle("history", &r.content);
                 store.insert(&handle, Arc::from(r.content.as_str()));
                 r.content = format!(
-                    "[gantry: tool result ({n_lines} lines) elided to free context; \
+                    "{STUB_PREFIX} ({n_lines} lines) elided to free context; \
                      retrieve(handle=\"{handle}\", start=1) to recover the elided lines]"
                 );
                 count += 1;
