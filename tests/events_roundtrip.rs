@@ -40,6 +40,17 @@ fn agent_turn_roundtrip() {
 }
 
 #[test]
+fn history_compacted_roundtrip() {
+    roundtrip(&GantryEvent::HistoryCompacted {
+        ts: 99,
+        role: "assistant".into(),
+        turn: 3,
+        results_elided: 5,
+        input_tokens: 42000,
+    });
+}
+
+#[test]
 fn tool_call_roundtrip() {
     roundtrip(&GantryEvent::ToolCall {
         ts: 3,

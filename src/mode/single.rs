@@ -36,6 +36,7 @@ impl SingleMode {
             registry: &self.registry,
             meter: &self.meter,
             cancel: &self.cancel,
+            context_limit: self.validated.context_limit,
         };
         let pass = run_agent_pass(
             &ctx,
@@ -70,6 +71,7 @@ pub(crate) struct PassCtx<'a> {
     pub registry: &'a ToolRegistry,
     pub meter: &'a TokenMeter,
     pub cancel: &'a CancellationToken,
+    pub context_limit: Option<u64>,
 }
 
 /// Run one bounded agent pass: repeated model calls + tool dispatch until the
@@ -88,6 +90,7 @@ pub(crate) async fn run_agent_pass(
         registry,
         meter,
         cancel,
+        context_limit,
     } = *ctx;
     let tools = registry.schemas();
     let mut messages = initial_messages;
@@ -185,6 +188,7 @@ pub(crate) async fn run_agent_pass(
             stop_requested = true;
         }
 
+        let input_tokens = resp.input_tokens;
         let mut tool_results = Vec::with_capacity(resp.tool_calls.len());
         for call in &resp.tool_calls {
             let out = registry
@@ -203,6 +207,15 @@ pub(crate) async fn run_agent_pass(
         });
         messages.push(ChatMessage::ToolResults(tool_results));
         turn += 1;
+
+        crate::mode::compaction::maybe_compact_history(
+            &mut messages,
+            registry.retrieval_store(),
+            context_limit,
+            input_tokens,
+            role,
+            turn,
+        );
     }
 
     PassResult {

@@ -44,6 +44,7 @@ pub async fn run_loop(validated: Validated) -> ModeRunOutcome {
         registry: &registry,
         meter: &meter,
         cancel: &cancel,
+        context_limit: validated.context_limit,
     };
 
     let mut prior_final = String::new();

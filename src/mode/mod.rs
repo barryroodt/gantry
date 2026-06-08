@@ -9,6 +9,7 @@ use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
 pub mod agent_loop;
+pub mod compaction;
 pub mod isolation;
 pub mod loop_mode;
 pub mod single;
