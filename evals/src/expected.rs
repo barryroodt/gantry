@@ -50,6 +50,22 @@ pub struct Expected {
     #[serde(default)]
     pub require_single_json_fence: Option<bool>,
 
+    // --- refinement-fixture assertions (skill-refine evals) ---
+    /// Passed to the binary as `--context-limit` (opt-in transcript compaction).
+    #[serde(default)]
+    pub context_limit: Option<u64>,
+    /// Assert the loop converged by calling the `decide_stop` control tool.
+    #[serde(default)]
+    pub expect_decide_stop: Option<bool>,
+    /// Each entry must be a substring of at least one path in the terminal
+    /// `changes` event (isolate teardown) — i.e. that file was edited.
+    #[serde(default)]
+    pub must_change_paths: Vec<String>,
+    /// Assert at least one `tool_result` carried a retrieval `handle` — output
+    /// was capped and stashed (exercises reversible retrieval, ADR-0012).
+    #[serde(default)]
+    pub expect_retrieve_handle: Option<bool>,
+
     // --- drift-tracking caps (baseline report; not part of the spec schema) ---
     #[serde(default)]
     pub max_input_tokens: Option<u64>,

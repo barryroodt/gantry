@@ -38,6 +38,9 @@ pub fn run_all(events: &[GantryEvent], expected: &Expected) -> Vec<AssertionFail
         ("assert_single_json_fence", assert_single_json_fence),
         ("assert_token_budget", assert_token_budget),
         ("assert_duration", assert_duration),
+        ("assert_decide_stop", assert_decide_stop),
+        ("assert_changed_paths", assert_changed_paths),
+        ("assert_retrieve_handle", assert_retrieve_handle),
     ];
 
     let mut failures = Vec::new();
@@ -77,6 +80,83 @@ pub fn assert_exit_matches(
         ));
     }
 
+    Ok(())
+}
+
+/// Refinement convergence: the loop ended by calling the `decide_stop` control
+/// tool rather than exhausting its iteration cap. No-op unless requested.
+pub fn assert_decide_stop(
+    events: &[GantryEvent],
+    expected: &Expected,
+) -> Result<(), AssertionFailure> {
+    if expected.expect_decide_stop != Some(true) {
+        return Ok(());
+    }
+    let stopped = events
+        .iter()
+        .any(|e| matches!(e, GantryEvent::ToolCall { tool, .. } if tool == "decide_stop"));
+    if !stopped {
+        return Err(AssertionFailure::new(
+            "assert_decide_stop",
+            "expected a decide_stop tool call (loop did not converge)",
+        ));
+    }
+    Ok(())
+}
+
+/// Each `must_change_paths` entry must be a substring of at least one path in a
+/// terminal `changes` event (isolate teardown). No-op when the list is empty.
+pub fn assert_changed_paths(
+    events: &[GantryEvent],
+    expected: &Expected,
+) -> Result<(), AssertionFailure> {
+    if expected.must_change_paths.is_empty() {
+        return Ok(());
+    }
+    let changed: Vec<&str> = events
+        .iter()
+        .filter_map(|e| match e {
+            GantryEvent::Changes { files, .. } => Some(files),
+            _ => None,
+        })
+        .flatten()
+        .map(|f| f.path.as_str())
+        .collect();
+    for needle in &expected.must_change_paths {
+        if !changed.iter().any(|p| p.contains(needle.as_str())) {
+            return Err(AssertionFailure::new(
+                "assert_changed_paths",
+                format!("no changed path matched {needle:?}; changed: {changed:?}"),
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// At least one `tool_result` carried a retrieval `handle` — i.e. output was
+/// capped and stashed (ADR-0012). No-op unless requested.
+pub fn assert_retrieve_handle(
+    events: &[GantryEvent],
+    expected: &Expected,
+) -> Result<(), AssertionFailure> {
+    if expected.expect_retrieve_handle != Some(true) {
+        return Ok(());
+    }
+    let any_handle = events.iter().any(|e| {
+        matches!(
+            e,
+            GantryEvent::ToolResult {
+                handle: Some(_),
+                ..
+            }
+        )
+    });
+    if !any_handle {
+        return Err(AssertionFailure::new(
+            "assert_retrieve_handle",
+            "expected at least one tool_result with a retrieval handle (no output was capped)",
+        ));
+    }
     Ok(())
 }
 

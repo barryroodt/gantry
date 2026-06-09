@@ -23,6 +23,9 @@ pub struct FixtureResult {
     pub total_output: u64,
     pub duration_ms: u64,
     pub cost_usd: f64,
+    pub files_changed: usize,
+    pub retrieve_handles: usize,
+    pub history_compacted: usize,
 }
 
 impl FixtureRunner {
@@ -144,6 +147,10 @@ async fn run_fixture(binary: &Path, dir: &Path) -> Result<FixtureResult> {
         args.push("--profile".into());
         args.push(profile_path.display().to_string());
     }
+    if let Some(limit) = expected.context_limit {
+        args.push("--context-limit".into());
+        args.push(limit.to_string());
+    }
 
     let start = std::time::Instant::now();
     let out = Command::new(binary)
@@ -174,6 +181,29 @@ async fn run_fixture(binary: &Path, dir: &Path) -> Result<FixtureResult> {
         .unwrap_or((0, 0));
 
     let fixture_cost = cost_usd(DEFAULT_EVAL_MODEL, totals.0, totals.1);
+    let files_changed: usize = events
+        .iter()
+        .filter_map(|e| match e {
+            gantry::events::GantryEvent::Changes { files, .. } => Some(files.len()),
+            _ => None,
+        })
+        .sum();
+    let retrieve_handles = events
+        .iter()
+        .filter(|e| {
+            matches!(
+                e,
+                gantry::events::GantryEvent::ToolResult {
+                    handle: Some(_),
+                    ..
+                }
+            )
+        })
+        .count();
+    let history_compacted = events
+        .iter()
+        .filter(|e| matches!(e, gantry::events::GantryEvent::HistoryCompacted { .. }))
+        .count();
 
     Ok(FixtureResult {
         fixture: name,
@@ -183,6 +213,9 @@ async fn run_fixture(binary: &Path, dir: &Path) -> Result<FixtureResult> {
         total_output: totals.1,
         duration_ms,
         cost_usd: fixture_cost,
+        files_changed,
+        retrieve_handles,
+        history_compacted,
     })
 }
 
