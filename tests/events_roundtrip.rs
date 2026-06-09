@@ -46,7 +46,7 @@ fn history_compacted_roundtrip() {
         role: "assistant".into(),
         turn: 3,
         results_elided: 5,
-        input_tokens: 42000,
+        context_tokens: 42000,
     });
 }
 

@@ -80,18 +80,22 @@ pub(crate) fn compact_history(
 }
 
 /// Run [`compact_history`] when a `context_limit` is set and the previous turn's
-/// `input_tokens` exceeded it, emitting `HistoryCompacted` if anything was elided.
-/// The opt-in + threshold policy lives here so the agent loop body stays focused.
+/// total context occupancy exceeded it, emitting `HistoryCompacted` if anything was
+/// elided. The trigger MUST use total occupancy (uncached input plus cache reads and
+/// writes), not `resp.input_tokens` alone: with prompt caching the uncached delta
+/// collapses to near-zero while the real context lives in the cached prefix, so an
+/// `input_tokens`-only check would never fire in practice. The opt-in plus threshold
+/// policy lives here so the agent loop body stays focused.
 pub(crate) fn maybe_compact_history(
     messages: &mut [ChatMessage],
     store: &RetrievalStore,
     context_limit: Option<u64>,
-    input_tokens: u64,
+    context_tokens: u64,
     role: &str,
     turn: u32,
 ) {
     let Some(limit) = context_limit else { return };
-    if input_tokens <= limit {
+    if context_tokens <= limit {
         return;
     }
     let elided = compact_history(messages, store, KEEP_RECENT_TURNS);
@@ -101,7 +105,7 @@ pub(crate) fn maybe_compact_history(
             role: role.into(),
             turn,
             results_elided: elided,
-            input_tokens,
+            context_tokens,
         }
         .emit();
     }

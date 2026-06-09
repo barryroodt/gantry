@@ -321,3 +321,56 @@ async fn elided_result_is_retrievable() {
         "retrieve should succeed with error == None; event: {retrieve_event:#?}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Test 4: compaction triggers on TOTAL context occupancy, not uncached
+// input_tokens alone. Regression guard for the prompt-caching trigger bug:
+// once the prefix is cached, resp.input_tokens collapses to near-zero while the
+// real context lives in cache_read — an input_tokens-only check never fires.
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn compaction_triggers_on_cached_context_not_just_input_tokens() {
+    let _guard = TestEmitterGuard::install();
+    let dir = TempDir::new().unwrap();
+    std::fs::write(dir.path().join("big.txt"), big_txt_content()).unwrap();
+    let prompt_path = dir.path().join("prompt.md");
+    std::fs::write(&prompt_path, "summarize big.txt").unwrap();
+
+    // Uncached input_tokens (50) is BELOW the limit (1000) on every turn, but the
+    // cached prefix (cache_read=5000) puts true occupancy at 5050, far above it.
+    let cached = |id: &str| ProviderResponse {
+        text: String::new(),
+        tool_calls: vec![ToolCallRequest {
+            id: id.into(),
+            name: "read_file".into(),
+            args_json: r#"{"path":"big.txt"}"#.into(),
+        }],
+        input_tokens: 50,
+        output_tokens: 1,
+        cache_read: 5000,
+        cache_write: 0,
+    };
+    let provider = StubProvider::new(vec![
+        cached("c1"),
+        cached("c2"),
+        cached("c3"),
+        cached("c4"),
+        done_response(),
+    ]);
+
+    let mut validated = test_validated(&dir, &prompt_path);
+    validated.context_limit = Some(1000);
+
+    run_single_with(validated, Box::new(provider), &dir, "summarize big.txt").await;
+
+    let events = _guard.drain_events();
+    assert!(
+        events.iter().any(|e| matches!(
+            e,
+            GantryEvent::HistoryCompacted { results_elided, .. } if *results_elided >= 1
+        )),
+        "compaction must fire on total occupancy: input_tokens=50 < limit=1000, but \
+         input_tokens + cache_read = 5050 > 1000 (input_tokens-only trigger would miss this)"
+    );
+}
