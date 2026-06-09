@@ -1,0 +1,9 @@
+Refine `SKILL.md` in this directory. It is a Claude Code *skill* definition (YAML frontmatter `name`/`description`, then a Markdown body) that has grown badly bloated and repetitive.
+
+First read `SKILL.md` in full to understand it. Then improve its quality as a skill without changing its purpose, its `name`, or the steps it documents:
+
+- Make the frontmatter `description` crisp and trigger-rich rather than a rambling run-on sentence.
+- Cut the heavy redundancy aggressively: repeated boilerplate, sections that merely restate other sections (e.g. "Why this phase matters" duplicating the phase intro, and near-identical "Common mistakes"/"Edge cases"/"Notes" blocks on every phase), and filler prose. Preserve the actual phases and their intent.
+- Keep the body scannable and tight.
+
+Work through it methodically, making one focused, high-confidence edit at a time and re-reading as needed to confirm each change. Keep going until the skill is tight and no further change would clearly improve it, then stop.

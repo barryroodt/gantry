@@ -1,0 +1,9 @@
+{
+  "fixture": "005-refine-small-skill",
+  "exit": "ok",
+  "mode": "loop",
+  "profile": "profiles/refine",
+  "require_single_json_fence": false,
+  "expect_decide_stop": true,
+  "must_change_paths": ["SKILL.md"]
+}

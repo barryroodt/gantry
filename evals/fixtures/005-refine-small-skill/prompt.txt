@@ -1,0 +1,9 @@
+Refine `SKILL.md` in this directory. It is a Claude Code *skill* definition: YAML frontmatter (`name`, `description`) followed by a Markdown body.
+
+Improve its quality as a skill without changing its purpose, its `name`, or the commands it documents:
+
+- Make the frontmatter `description` crisp and trigger-rich — it decides when the skill auto-activates, so it must state when to use the skill and the phrases that trigger it, without rambling.
+- Keep the body scannable: tight steps, no redundancy, no vague filler. If a section merely restates another (e.g. a diagram that duplicates the numbered steps), drop it.
+- Ensure every command is correct, minimal, and safe.
+
+Make ONE focused, high-confidence improvement per iteration. Prefer small, surgical edits over rewrites. Call `decide_stop` as soon as the next change would not clearly improve the skill.

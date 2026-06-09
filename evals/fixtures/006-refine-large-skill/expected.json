@@ -1,0 +1,10 @@
+{
+  "fixture": "006-refine-large-skill",
+  "exit": "ok",
+  "mode": "single",
+  "profile": "profiles/refine",
+  "require_single_json_fence": false,
+  "must_change_paths": ["SKILL.md"],
+  "expect_retrieve_handle": true,
+  "context_limit": 4000
+}
