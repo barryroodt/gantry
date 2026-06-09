@@ -25,6 +25,10 @@ fn write_minimal_fixture(root: &std::path::Path) {
         max_input_tokens: None,
         max_output_tokens: None,
         max_duration_ms: None,
+        context_limit: None,
+        expect_decide_stop: None,
+        must_change_paths: Vec::new(),
+        expect_retrieve_handle: None,
     };
     fs::write(
         root.join("expected.json"),
@@ -157,4 +161,65 @@ async fn team_fixture_003_runs_live() {
         "003 team fixture failed live: {:?}",
         result.failures
     );
+}
+
+/// Shared driver for the live, manually-triggered skill-refinement evals.
+/// Gated behind `GANTRY_LIVE_EVAL=1` (the API key is often ambiently present
+/// via .envrc, so a key check alone would let these flake the default gate).
+/// Prints a one-line metrics summary for before/after-update comparison.
+async fn run_live_refine(fixture_name: &str) {
+    let Some(binary) = gantry_binary() else {
+        eprintln!("skipping {fixture_name}: gantry binary not built");
+        return;
+    };
+    if std::env::var("GANTRY_LIVE_EVAL").as_deref() != Ok("1") {
+        eprintln!("skipping {fixture_name}: set GANTRY_LIVE_EVAL=1 to run live refine evals");
+        return;
+    }
+    if std::env::var("ANTHROPIC_API_KEY").is_err() {
+        eprintln!("skipping {fixture_name}: ANTHROPIC_API_KEY not set");
+        return;
+    }
+
+    let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("fixtures")
+        .join(fixture_name);
+    let runner = FixtureRunner {
+        binary_path: binary,
+        fixtures_dir: fixture.parent().unwrap().to_path_buf(),
+        max_parallel: 1,
+    };
+
+    let result = runner
+        .run_one(&fixture)
+        .await
+        .unwrap_or_else(|e| panic!("run {fixture_name}: {e}"));
+
+    eprintln!(
+        "[eval] {fixture_name}: passed={} in={} out={} dur_ms={} cost=${:.4} \
+         files_changed={} retrieve_handles={} history_compacted={}",
+        result.passed,
+        result.total_input,
+        result.total_output,
+        result.duration_ms,
+        result.cost_usd,
+        result.files_changed,
+        result.retrieve_handles,
+        result.history_compacted,
+    );
+    assert!(
+        result.passed,
+        "{fixture_name} failed live: {:?}",
+        result.failures
+    );
+}
+
+#[tokio::test]
+async fn refine_small_skill_runs_live() {
+    run_live_refine("005-refine-small-skill").await;
+}
+
+#[tokio::test]
+async fn refine_large_skill_runs_live() {
+    run_live_refine("006-refine-large-skill").await;
 }

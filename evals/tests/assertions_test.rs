@@ -1,7 +1,8 @@
 use gantry::events::{ExitCode, GantryEvent};
 use gantry_evals::{
-    assert_duration, assert_exit_matches, assert_findings_in_range, assert_forbidden_message_regex,
-    assert_message_regex_matches, assert_required_paths, assert_required_severities,
+    assert_changed_paths, assert_decide_stop, assert_duration, assert_exit_matches,
+    assert_findings_in_range, assert_forbidden_message_regex, assert_message_regex_matches,
+    assert_required_paths, assert_required_severities, assert_retrieve_handle,
     assert_single_json_fence, assert_subagent_lifecycle, assert_token_budget,
     assert_tool_call_pairing, run_all, Expected,
 };
@@ -24,6 +25,10 @@ fn base_expected() -> Expected {
         max_input_tokens: None,
         max_output_tokens: None,
         max_duration_ms: None,
+        context_limit: None,
+        expect_decide_stop: None,
+        must_change_paths: Vec::new(),
+        expect_retrieve_handle: None,
     }
 }
 
@@ -310,4 +315,97 @@ fn assert_subagent_lifecycle_pass_and_fail() {
     let f = assert_subagent_lifecycle(&late).unwrap_err();
     assert_eq!(f.rule, "assert_subagent_lifecycle");
     assert!(f.detail.contains("after the unify fence"));
+}
+
+#[test]
+fn assert_decide_stop_pass_and_fail() {
+    let mut expected = base_expected();
+    expected.expect_decide_stop = Some(true);
+
+    let stop = GantryEvent::ToolCall {
+        ts: 1,
+        role: "loop".into(),
+        turn: 0,
+        tool: "decide_stop".into(),
+        args: "{}".into(),
+    };
+    assert!(assert_decide_stop(&[stop], &expected).is_ok());
+
+    let other = GantryEvent::ToolCall {
+        ts: 1,
+        role: "loop".into(),
+        turn: 0,
+        tool: "read_file".into(),
+        args: "{}".into(),
+    };
+    let failure = assert_decide_stop(&[other], &expected).unwrap_err();
+    assert_eq!(failure.rule, "assert_decide_stop");
+
+    // No-op when not requested.
+    assert!(assert_decide_stop(&[], &base_expected()).is_ok());
+}
+
+#[test]
+fn assert_changed_paths_pass_and_fail() {
+    use gantry::events::FileChangeRec;
+    let mut expected = base_expected();
+    expected.must_change_paths = vec!["SKILL.md".into()];
+
+    let hit = GantryEvent::Changes {
+        ts: 1,
+        files: vec![FileChangeRec {
+            path: "SKILL.md".into(),
+            kind: "modified".into(),
+        }],
+    };
+    assert!(assert_changed_paths(&[hit], &expected).is_ok());
+
+    let miss = GantryEvent::Changes {
+        ts: 1,
+        files: vec![FileChangeRec {
+            path: "other.txt".into(),
+            kind: "modified".into(),
+        }],
+    };
+    let failure = assert_changed_paths(&[miss], &expected).unwrap_err();
+    assert_eq!(failure.rule, "assert_changed_paths");
+
+    // No-op when the list is empty.
+    assert!(assert_changed_paths(&[], &base_expected()).is_ok());
+}
+
+#[test]
+fn assert_retrieve_handle_pass_and_fail() {
+    let mut expected = base_expected();
+    expected.expect_retrieve_handle = Some(true);
+
+    let with_handle = GantryEvent::ToolResult {
+        ts: 1,
+        role: "loop".into(),
+        turn: 0,
+        tool: "read_file".into(),
+        bytes: 10,
+        bytes_out: 10,
+        truncated: true,
+        error: None,
+        handle: Some("read_file/abc123".into()),
+    };
+    assert!(assert_retrieve_handle(&[with_handle], &expected).is_ok());
+
+    let no_handle = GantryEvent::ToolResult {
+        ts: 1,
+        role: "loop".into(),
+        turn: 0,
+        tool: "read_file".into(),
+        bytes: 10,
+        bytes_out: 10,
+        truncated: false,
+        error: None,
+        handle: None,
+    };
+    let failure = assert_retrieve_handle(&[no_handle], &expected).unwrap_err();
+    assert_eq!(failure.rule, "assert_retrieve_handle");
+
+    // No-op when not requested.
+    assert!(assert_retrieve_handle(&[], &base_expected()).is_ok());
 }
