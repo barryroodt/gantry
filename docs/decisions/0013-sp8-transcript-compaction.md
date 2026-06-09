@@ -30,11 +30,16 @@ exceeded `N`. Only when the threshold is breached does compaction run.
 
 This threshold-triggered design is deliberate (see the prompt-cache tradeoff below).
 
-### Trigger: previous turn's `input_tokens`
+### Trigger: previous turn's total context occupancy
 
-The provider reports `input_tokens` in its response after each model call. This value
-reflects the full transcript that was actually sent. Using it (rather than a local byte
-estimate) makes the trigger accurate regardless of tokeniser internals.
+The provider reports per-call token usage after each model call. The compaction trigger
+compares the previous turn's **total context occupancy** — uncached `input_tokens` +
+`cache_read` + `cache_write` — against `--context-limit`, **not `input_tokens` alone**.
+This is essential because prompt caching is enabled: once the stable prefix is cached, the
+uncached `input_tokens` collapses to near-zero while the real context that counts against
+the model's window lives in `cache_read`. An `input_tokens`-only trigger therefore never
+fires in a cached (i.e. normal) run — a bug the skill-refinement evals surfaced. Using
+total occupancy keeps the trigger accurate regardless of caching or tokeniser internals.
 
 ### In-place stash-and-stub via `RetrievalStore`
 

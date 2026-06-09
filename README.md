@@ -74,7 +74,7 @@ Each line of stdout is one JSON event; the final `result` event carries the exit
 | `--inject-skill <name>` | no | Inject `<workdir>/.claude/skills/<name>/SKILL.md` into the system prompt (repeatable). |
 | `--isolate` | no | Run against a copy-on-write shadow of the workdir (see [Isolation](#isolation)). |
 | `--max-iterations <n>` | no | Iteration cap for `--mode loop` (default 5, min 1). |
-| `--context-limit <TOKENS>` | no | Opt-in transcript compaction threshold. When the previous turn's `input_tokens` exceed this value, tool results older than the last 3 turns (>512 B, not already a stub) are folded into `retrieve`-able stubs to free context-window headroom. Off by default; single and loop modes only (no effect in team mode). |
+| `--context-limit <TOKENS>` | no | Opt-in transcript compaction threshold. When the previous turn's total context occupancy (uncached `input_tokens` + `cache_read` + `cache_write`) exceeds this value, tool results older than the last 3 turns (>512 B, not already a stub) are folded into `retrieve`-able stubs to free context-window headroom. Off by default; single and loop modes only (no effect in team mode). |
 
 ### Providers
 

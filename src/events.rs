@@ -89,7 +89,7 @@ pub enum GantryEvent {
         role: String,
         turn: u32,
         results_elided: u32,
-        input_tokens: u64,
+        context_tokens: u64,
     },
     ToolCall {
         ts: u64,

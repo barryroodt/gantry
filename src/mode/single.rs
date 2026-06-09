@@ -188,7 +188,10 @@ pub(crate) async fn run_agent_pass(
             stop_requested = true;
         }
 
-        let input_tokens = resp.input_tokens;
+        let context_tokens = resp
+            .input_tokens
+            .saturating_add(resp.cache_read)
+            .saturating_add(resp.cache_write);
         let mut tool_results = Vec::with_capacity(resp.tool_calls.len());
         for call in &resp.tool_calls {
             let out = registry
@@ -212,7 +215,7 @@ pub(crate) async fn run_agent_pass(
             &mut messages,
             registry.retrieval_store(),
             context_limit,
-            input_tokens,
+            context_tokens,
             role,
             turn,
         );

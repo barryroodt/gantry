@@ -67,9 +67,10 @@ pub struct Cli {
     pub max_iterations: Option<u32>,
 
     /// Compact old tool results out of the transcript once the previous turn's
-    /// input tokens exceed this many tokens (opt-in; recoverable via the retrieve
-    /// tool). Off by default. Keeps long runs under the model's context window.
-    /// Single/loop modes only — no effect in team mode (its passes are bounded).
+    /// total context occupancy (uncached input + cache reads + cache writes)
+    /// exceeds this many tokens (opt-in; recoverable via the retrieve tool). Off
+    /// by default. Keeps long runs under the model's context window. Single/loop
+    /// modes only — no effect in team mode (its passes are bounded).
     #[arg(long = "context-limit", value_name = "TOKENS", value_parser = clap::value_parser!(u64).range(1..))]
     pub context_limit: Option<u64>,
 }
