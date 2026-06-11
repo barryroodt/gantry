@@ -515,6 +515,7 @@ fn parse_expected_exit(exit: &str) -> Result<ExitCode, AssertionFailure> {
         "timeout" => Ok(ExitCode::Timeout),
         "error" => Ok(ExitCode::Error),
         "config" => Ok(ExitCode::Config),
+        "rate_limited" => Ok(ExitCode::RateLimited),
         other => Err(AssertionFailure::new(
             "assert_exit_matches",
             format!("unknown expected exit: {other:?}"),

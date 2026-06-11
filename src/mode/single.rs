@@ -1,6 +1,6 @@
-use super::{bootstrap, outcome, ModeRunOutcome, RunBootstrap};
+use super::{bootstrap, emit_provider_failure, outcome, ModeRunOutcome, RunBootstrap};
 use crate::cli::Validated;
-use crate::events::{now_ms, ErrorKind, ExitCode, GantryEvent};
+use crate::events::{now_ms, ExitCode, GantryEvent};
 use crate::meter::TokenMeter;
 use crate::provider::{ChatMessage, ProviderAdapter, ToolResult};
 use crate::skills::SkillLoader;
@@ -126,18 +126,10 @@ pub(crate) async fn run_agent_pass(
         let resp = match resp {
             Ok(r) => r,
             Err(err) => {
-                let _ = GantryEvent::Error {
-                    ts: now_ms(),
-                    kind: ErrorKind::Provider,
-                    message: err.to_string(),
-                    recoverable: false,
-                    retry_after_ms: None,
-                }
-                .emit();
                 return PassResult {
                     final_text,
                     stop_requested,
-                    exit: Some(ExitCode::Error),
+                    exit: Some(emit_provider_failure(&err)),
                 };
             }
         };

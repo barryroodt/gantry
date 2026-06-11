@@ -2,7 +2,7 @@ use crate::cli::Validated;
 use crate::events::{now_ms, ErrorKind, ExitCode, GantryEvent};
 use crate::meter::TokenMeter;
 use crate::mode::agent_loop::LoopDriver;
-use crate::mode::{bootstrap, outcome, ModeRunOutcome, RunBootstrap};
+use crate::mode::{bootstrap, emit_provider_failure, outcome, ModeRunOutcome, RunBootstrap};
 use crate::provider::{ChatMessage, ProviderAdapter, ToolSchema};
 use crate::skills::SkillLoader;
 use crate::tools::subagent::{
@@ -195,17 +195,7 @@ impl TeamMode {
             };
             let resp = match resp {
                 Ok(r) => r,
-                Err(err) => {
-                    let _ = GantryEvent::Error {
-                        ts: now_ms(),
-                        kind: ErrorKind::Provider,
-                        message: err.to_string(),
-                        recoverable: false,
-                        retry_after_ms: None,
-                    }
-                    .emit();
-                    return Err(ExitCode::Error);
-                }
+                Err(err) => return Err(emit_provider_failure(&err)),
             };
             if self
                 .meter

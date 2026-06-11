@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 
-use gantry::events::{ExitCode, GantryEvent};
+use gantry::events::{ErrorKind, ExitCode, GantryEvent};
 use serde_json::{json, Value};
 use tempfile::TempDir;
 use wiremock::matchers::{header, method, path};
@@ -313,4 +313,67 @@ async fn main_exit_timeout_for_timeout_ms_one() {
 
     let (code, stdout) = run_bin(&args, &[]);
     assert_exit(&stdout, code, ExitCode::Timeout);
+}
+
+/// A terminal 429 maps to the embedder contract: `error` event with
+/// `kind: provider` + `recoverable: true`, process exit 5 (`rate_limited`).
+/// The mock 429s every attempt — with `rate_limit_retries: 1` the binary sends
+/// two requests (~1s back-off between) before surfacing the failure. The
+/// `retry_after_ms` value is deliberately NOT asserted here: the rig adapters
+/// drop HTTP headers, so the hint only flows through error *message text*
+/// (covered by the `mode` unit tests).
+#[tokio::test]
+async fn main_exit_rate_limited_for_persistent_429() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/chat/completions"))
+        .respond_with(ResponseTemplate::new(429).set_body_json(json!({
+            "error": {
+                "message": "Rate limit reached for gpt-4o",
+                "type": "tokens",
+                "code": "rate_limit_exceeded"
+            }
+        })))
+        .mount(&mock_server)
+        .await;
+
+    let (_dir, workdir, prompt) = temp_fixture("rate-limited");
+    let args = base_args(&workdir, &prompt);
+
+    let _env = EnvVarGuard::set_many(&[
+        ("OPENAI_API_KEY", Some("test-openai-key")),
+        (
+            "OPENAI_BASE_URL",
+            Some(openai_base_url(&mock_server).as_str()),
+        ),
+    ]);
+
+    let (code, stdout) = run_bin(&args, &[]);
+    assert_exit(&stdout, code, ExitCode::RateLimited);
+
+    let events: Vec<GantryEvent> = stdout
+        .lines()
+        .filter(|line| !line.is_empty())
+        .map(|line| serde_json::from_str(line).expect("parse NDJSON event"))
+        .collect();
+
+    assert!(
+        matches!(
+            &events[0],
+            GantryEvent::Start { schema_version, .. } if schema_version == "1.0"
+        ),
+        "first event must be start with schema_version 1.0, got {:?}",
+        events[0]
+    );
+    assert!(
+        events.iter().any(|e| matches!(
+            e,
+            GantryEvent::Error {
+                kind: ErrorKind::Provider,
+                recoverable: true,
+                ..
+            }
+        )),
+        "expected a recoverable provider error event, got {events:?}"
+    );
 }
