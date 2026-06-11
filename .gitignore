@@ -8,3 +8,10 @@
 .env
 .env.*
 .envrc
+
+# Benchmark run artifacts (one committed sample is kept)
+bench/results/*
+!bench/results/sample/
+
+# Benchmark repo clone cache
+bench/.cache/
