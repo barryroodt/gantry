@@ -49,6 +49,8 @@ pub async fn run_isolated(mut v: Validated) -> ModeRunOutcome {
                 ts: now_ms(),
                 kind: ErrorKind::Internal,
                 message: format!("--isolate: diff capture failed: {err}"),
+                recoverable: false,
+                retry_after_ms: None,
             }
             .emit();
         }
@@ -120,6 +122,8 @@ fn config_error(message: &str) -> ModeRunOutcome {
         ts: now_ms(),
         kind: ErrorKind::Config,
         message: message.to_string(),
+        recoverable: false,
+        retry_after_ms: None,
     }
     .emit();
     ModeRunOutcome {

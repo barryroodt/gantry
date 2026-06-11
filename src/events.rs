@@ -3,6 +3,11 @@ use serde::{Deserialize, Serialize};
 
 pub const TRUNCATE_MARKER: &str = "…[truncated]";
 
+/// NDJSON contract version stamped on the `start` event. Semver: MAJOR =
+/// remove/rename a field or event, or change semantics; MINOR = additive
+/// field/event/exit-code.
+pub const SCHEMA_VERSION: &str = "1.0";
+
 pub fn now_ms() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -38,6 +43,7 @@ pub enum ExitCode {
     Timeout,
     Config,
     Error,
+    RateLimited,
 }
 
 impl ExitCode {
@@ -49,6 +55,7 @@ impl ExitCode {
             Self::Budget => 2,
             Self::Timeout => 3,
             Self::Config => 4,
+            Self::RateLimited => 5,
         }
     }
 }
@@ -65,6 +72,9 @@ pub struct FileChangeRec {
 pub enum GantryEvent {
     Start {
         ts: u64,
+        /// Contract version (`SCHEMA_VERSION`); `String` because the enum
+        /// derives `Deserialize`.
+        schema_version: String,
         model: String,
         provider: String,
         mode: String,
@@ -142,6 +152,11 @@ pub enum GantryEvent {
         ts: u64,
         kind: ErrorKind,
         message: String,
+        /// Whether an embedder may retry the run (provider rate-limit/transient).
+        recoverable: bool,
+        /// Provider-suggested back-off, when known. Omitted from NDJSON if absent.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        retry_after_ms: Option<u64>,
     },
     Result {
         ts: u64,

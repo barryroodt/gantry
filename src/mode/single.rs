@@ -130,6 +130,8 @@ pub(crate) async fn run_agent_pass(
                     ts: now_ms(),
                     kind: ErrorKind::Provider,
                     message: err.to_string(),
+                    recoverable: false,
+                    retry_after_ms: None,
                 }
                 .emit();
                 return PassResult {

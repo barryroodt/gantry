@@ -32,6 +32,8 @@ pub fn install_panic_hook() {
             ts: now_ms(),
             kind: ErrorKind::Internal,
             message: format!("{info}"),
+            recoverable: false,
+            retry_after_ms: None,
         }
         .emit();
     }));

@@ -84,6 +84,8 @@ pub(crate) fn config_error(meter: &TokenMeter, message: &str) -> ModeRunOutcome 
         ts: now_ms(),
         kind: ErrorKind::Config,
         message: message.to_string(),
+        recoverable: false,
+        retry_after_ms: None,
     }
     .emit();
     outcome(ExitCode::Config, meter)

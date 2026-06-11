@@ -4,7 +4,7 @@ use std::time::Instant;
 use futures_util::FutureExt;
 use gantry::{
     cli::Cli,
-    events::{now_ms, ErrorKind, ExitCode, GantryEvent},
+    events::{now_ms, ErrorKind, ExitCode, GantryEvent, SCHEMA_VERSION},
     meter::MeterSnapshot,
     mode::{self, ModeRunOutcome},
     tracing_setup::{init_tracing, install_panic_hook},
@@ -56,6 +56,8 @@ async fn run_inner() -> ModeRunOutcome {
                 ts: now_ms(),
                 kind: ErrorKind::Config,
                 message: err.to_string(),
+                recoverable: false,
+                retry_after_ms: None,
             }
             .emit();
             return ModeRunOutcome {
@@ -67,6 +69,7 @@ async fn run_inner() -> ModeRunOutcome {
 
     let _ = GantryEvent::Start {
         ts: now_ms(),
+        schema_version: SCHEMA_VERSION.to_string(),
         model: v.model.clone(),
         provider: v.provider.as_str().to_string(),
         mode: v.mode.as_str().to_string(),

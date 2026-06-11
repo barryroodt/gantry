@@ -200,6 +200,8 @@ impl TeamMode {
                         ts: now_ms(),
                         kind: ErrorKind::Provider,
                         message: err.to_string(),
+                        recoverable: false,
+                        retry_after_ms: None,
                     }
                     .emit();
                     return Err(ExitCode::Error);
@@ -231,6 +233,8 @@ impl TeamMode {
             ts: now_ms(),
             kind: ErrorKind::Provider,
             message: "structured output: no respond tool call and no JSON fence".into(),
+            recoverable: false,
+            retry_after_ms: None,
         }
         .emit();
         Err(ExitCode::Error)
@@ -249,6 +253,8 @@ impl TeamMode {
             ts: now_ms(),
             kind: ErrorKind::TeamCollapse,
             message: message.into(),
+            recoverable: false,
+            retry_after_ms: None,
         }
         .emit();
         ExitCode::Error

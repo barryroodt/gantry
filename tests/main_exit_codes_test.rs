@@ -128,6 +128,7 @@ fn exit_string(exit: ExitCode) -> &'static str {
         ExitCode::Budget => "budget",
         ExitCode::Timeout => "timeout",
         ExitCode::Config => "config",
+        ExitCode::RateLimited => "rate_limited",
     }
 }
 
