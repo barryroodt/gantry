@@ -80,14 +80,7 @@ pub(crate) fn outcome(exit: ExitCode, meter: &TokenMeter) -> ModeRunOutcome {
 
 /// Emit a `config` error event and return the matching terminal outcome.
 pub(crate) fn config_error(meter: &TokenMeter, message: &str) -> ModeRunOutcome {
-    let _ = GantryEvent::Error {
-        ts: now_ms(),
-        kind: ErrorKind::Config,
-        message: message.to_string(),
-        recoverable: false,
-        retry_after_ms: None,
-    }
-    .emit();
+    let _ = GantryEvent::unrecoverable(ErrorKind::Config, message).emit();
     outcome(ExitCode::Config, meter)
 }
 

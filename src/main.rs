@@ -52,14 +52,7 @@ async fn run_inner() -> ModeRunOutcome {
     let v = match Cli::parse_and_validate() {
         Ok(v) => v,
         Err(err) => {
-            let _ = GantryEvent::Error {
-                ts: now_ms(),
-                kind: ErrorKind::Config,
-                message: err.to_string(),
-                recoverable: false,
-                retry_after_ms: None,
-            }
-            .emit();
+            let _ = GantryEvent::unrecoverable(ErrorKind::Config, err.to_string()).emit();
             return ModeRunOutcome {
                 exit: ExitCode::Config,
                 meter: empty_meter(),

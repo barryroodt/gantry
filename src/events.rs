@@ -197,6 +197,19 @@ impl GantryEvent {
         }
     }
 
+    /// Non-retryable `error` event: `recoverable: false`, no back-off hint.
+    /// Every non-provider failure site constructs through here; only
+    /// `mode::emit_provider_failure` builds recoverable errors.
+    pub fn unrecoverable(kind: ErrorKind, message: impl Into<String>) -> Self {
+        Self::Error {
+            ts: now_ms(),
+            kind,
+            message: message.into(),
+            recoverable: false,
+            retry_after_ms: None,
+        }
+    }
+
     /// Emit as one NDJSON line on stdout + flush (via [`crate::emitter::EventEmitter`]).
     pub fn emit(&self) -> Result<()> {
         crate::emitter::emit_active(self)

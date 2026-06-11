@@ -219,13 +219,10 @@ impl TeamMode {
         if let Some(v) = extract_json_fence(&last_text) {
             return Ok(v);
         }
-        let _ = GantryEvent::Error {
-            ts: now_ms(),
-            kind: ErrorKind::Provider,
-            message: "structured output: no respond tool call and no JSON fence".into(),
-            recoverable: false,
-            retry_after_ms: None,
-        }
+        let _ = GantryEvent::unrecoverable(
+            ErrorKind::Provider,
+            "structured output: no respond tool call and no JSON fence",
+        )
         .emit();
         Err(ExitCode::Error)
     }
@@ -239,14 +236,7 @@ impl TeamMode {
     }
 
     fn collapse(&self, message: &str) -> ExitCode {
-        let _ = GantryEvent::Error {
-            ts: now_ms(),
-            kind: ErrorKind::TeamCollapse,
-            message: message.into(),
-            recoverable: false,
-            retry_after_ms: None,
-        }
-        .emit();
+        let _ = GantryEvent::unrecoverable(ErrorKind::TeamCollapse, message).emit();
         ExitCode::Error
     }
 

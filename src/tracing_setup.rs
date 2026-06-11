@@ -2,7 +2,7 @@ use std::io::{self, IsTerminal};
 
 use tracing_subscriber::EnvFilter;
 
-use crate::events::{now_ms, ErrorKind, GantryEvent};
+use crate::events::{ErrorKind, GantryEvent};
 
 pub fn init_tracing() {
     tracing_subscriber::fmt()
@@ -28,13 +28,6 @@ pub fn init_tracing() {
 pub fn install_panic_hook() {
     std::panic::set_hook(Box::new(|info| {
         eprintln!("{info}");
-        let _ = GantryEvent::Error {
-            ts: now_ms(),
-            kind: ErrorKind::Internal,
-            message: format!("{info}"),
-            recoverable: false,
-            retry_after_ms: None,
-        }
-        .emit();
+        let _ = GantryEvent::unrecoverable(ErrorKind::Internal, format!("{info}")).emit();
     }));
 }

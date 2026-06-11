@@ -115,21 +115,10 @@ fn assert_exit(stdout: &str, code: i32, want: ExitCode) {
         "terminal result exit should be {want:?}, got {event:?}"
     );
     assert_eq!(
-        value["exit"].as_str(),
-        Some(exit_string(want)),
+        value["exit"],
+        serde_json::to_value(want).expect("serialize exit"),
         "terminal result exit string"
     );
-}
-
-fn exit_string(exit: ExitCode) -> &'static str {
-    match exit {
-        ExitCode::Ok => "ok",
-        ExitCode::Error => "error",
-        ExitCode::Budget => "budget",
-        ExitCode::Timeout => "timeout",
-        ExitCode::Config => "config",
-        ExitCode::RateLimited => "rate_limited",
-    }
 }
 
 fn ok_response() -> Value {

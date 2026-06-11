@@ -508,19 +508,16 @@ fn terminal_result(events: &[GantryEvent]) -> Option<&GantryEvent> {
         .find(|event| matches!(event, GantryEvent::Result { .. }))
 }
 
+/// Parse an expected-exit string via serde — the wire format
+/// (`ExitCode`'s `rename_all = "snake_case"`) is the single source of truth,
+/// so new exit codes need no change here.
 fn parse_expected_exit(exit: &str) -> Result<ExitCode, AssertionFailure> {
-    match exit {
-        "ok" => Ok(ExitCode::Ok),
-        "budget" => Ok(ExitCode::Budget),
-        "timeout" => Ok(ExitCode::Timeout),
-        "error" => Ok(ExitCode::Error),
-        "config" => Ok(ExitCode::Config),
-        "rate_limited" => Ok(ExitCode::RateLimited),
-        other => Err(AssertionFailure::new(
+    serde_json::from_value(Value::String(exit.to_string())).map_err(|_| {
+        AssertionFailure::new(
             "assert_exit_matches",
-            format!("unknown expected exit: {other:?}"),
-        )),
-    }
+            format!("unknown expected exit: {exit:?}"),
+        )
+    })
 }
 
 fn assistant_texts(events: &[GantryEvent]) -> Vec<&str> {
