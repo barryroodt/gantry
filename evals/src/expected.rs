@@ -9,7 +9,9 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Expected {
     pub fixture: String,
-    /// Expected terminal exit: "ok" | "budget" | "timeout" | "error" | "config".
+    /// Expected terminal exit in `ExitCode`'s snake_case wire form
+    /// (e.g. "ok", "budget", "timeout", "error", "config", "rate_limited");
+    /// parsed via serde, so the enum is the single source of truth.
     pub exit: String,
 
     /// Run mode for this fixture: "single" (default) or "team".

@@ -93,7 +93,9 @@ fn map_provider_failure(err: &anyhow::Error) -> (bool, Option<u64>, ExitCode) {
     match classify_error(err) {
         ErrorClass::RateLimited { retry_after } => (
             true,
-            retry_after.map(|d| d.as_millis() as u64),
+            // Saturate: the hint text is provider-controlled, and a u64::MAX-seconds
+            // hint would otherwise truncate to garbage milliseconds.
+            retry_after.map(|d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX)),
             ExitCode::RateLimited,
         ),
         ErrorClass::Transient => (true, None, ExitCode::Error),
@@ -149,6 +151,15 @@ mod tests {
         assert_eq!(
             map_provider_failure(&err),
             (true, Some(30_000), ExitCode::RateLimited)
+        );
+    }
+
+    #[test]
+    fn absurd_provider_controlled_hint_saturates_instead_of_truncating() {
+        let err = anyhow!("429; retry-after=18446744073709551615");
+        assert_eq!(
+            map_provider_failure(&err),
+            (true, Some(u64::MAX), ExitCode::RateLimited)
         );
     }
 
