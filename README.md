@@ -151,7 +151,7 @@ Gantry emits one JSON object per line to **stdout**, each tagged with an `"event
 
 | `event` | When | Key fields |
 |---|---|---|
-| `start` | run begins | `model`, `provider`, `mode`, `workdir` |
+| `start` | run begins | `schema_version`, `model`, `provider`, `mode`, `workdir` |
 | `skill_loaded` | a skill is injected | `name`, `bytes` |
 | `agent_turn` | each model call | `role`, `turn`, `input_tokens`, `output_tokens`, `cache_read`, `cache_write` |
 | `tool_call` | a tool is invoked | `role`, `turn`, `tool`, `args` |
@@ -164,13 +164,13 @@ Gantry emits one JSON object per line to **stdout**, each tagged with an `"event
 | `history_compacted` | transcript compaction ran | `role`, `turn`, `results_elided`, `input_tokens` |
 | `budget_exceeded` | token budget tripped | `limit`, `total` |
 | `changes` | `--isolate` teardown | `files: [{path, kind}]` |
-| `error` | recoverable/terminal error | `kind` (`config`/`provider`/`team_collapse`/`internal`), `message` |
+| `error` | recoverable/terminal error | `kind` (`config`/`provider`/`team_collapse`/`internal`), `message`, `recoverable`, `retry_after_ms?` |
 | `result` | terminal (always last) | `exit`, `total_input`, `total_output`, `total_cache_read`, `total_cache_write`, `duration_ms` |
 
 Example:
 
 ```json
-{"event":"start","ts":1730000000000,"model":"anthropic/claude-opus-4-8","provider":"anthropic","mode":"single","workdir":"/repo"}
+{"event":"start","ts":1730000000000,"schema_version":"1.0","model":"anthropic/claude-opus-4-8","provider":"anthropic","mode":"single","workdir":"/repo"}
 {"event":"tool_call","ts":1730000000123,"role":"single","turn":0,"tool":"read_file","args":"{\"path\":\"src/main.rs\"}"}
 {"event":"tool_result","ts":1730000000130,"role":"single","turn":0,"tool":"read_file","bytes":4096,"bytes_out":4096,"truncated":false}
 {"event":"result","ts":1730000004567,"exit":"ok","total_input":12000,"total_output":800,"total_cache_read":0,"total_cache_write":0,"duration_ms":4567}
@@ -187,6 +187,13 @@ The `result.exit` value maps to the process exit code:
 | `budget` | 2 | Token budget exceeded. |
 | `timeout` | 3 | Wall-clock timeout (or SIGINT/SIGTERM). |
 | `config` | 4 | Invalid configuration (bad flags, missing prompt, unknown provider). |
+| `rate_limited` | 5 | Provider rate-limited after retries — back off (honor `error.retry_after_ms` when present) and retry the run. |
+
+### Contract versioning
+
+The first event of any successfully-started run is `start`, carrying `schema_version` — version-guard your parser on it. CLI-validation failures emit `error{kind:"config"}` + `result` with **no** `start`, so exit-4 runs carry no version. The version is semver: **MAJOR** = a field/event is removed or renamed, or semantics change; **MINOR** = additive field, event, or exit code. Current: `1.0`.
+
+On terminal failures, `error.recoverable` tells an embedder whether retrying the run may help (provider rate-limit or transient failure) — `false` means give up or fix the input (`config`, `team_collapse`, `internal`, fatal provider errors). `retry_after_ms` is present only when the provider supplied a back-off hint.
 
 ## Architecture
 

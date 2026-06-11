@@ -1,8 +1,8 @@
 # Design: machine-grade terminal contract for embedders (opportunity A)
 
-**Date:** 2026-06-08
-**Status:** Approved — ready for implementation planning.
-**Branch:** `feat/embedder-contract`
+**Date:** 2026-06-08 (amended 2026-06-11 after grounded review)
+**Status:** Implemented.
+**Branch:** `feat/embedder-contract-impl`
 **Related:** `2026-06-08-murli-borrowable-opportunities.md` (opportunity A; B/C/D deferred)
 
 ## Problem
@@ -61,7 +61,7 @@ Add `schema_version` to `GantryEvent::Start`, value `"1.0"`:
 ```rust
 Start {
     ts: u64,
-    schema_version: &'static str,  // const SCHEMA_VERSION = "1.0"
+    schema_version: String,  // populated from SCHEMA_VERSION
     model: String,
     provider: String,
     mode: String,
@@ -69,13 +69,19 @@ Start {
 }
 ```
 
-Define `pub const SCHEMA_VERSION: &str = "1.0";` in `events.rs`. Embedders read the
-first NDJSON line to learn the version.
+Define `pub const SCHEMA_VERSION: &str = "1.0";` in `events.rs`. The field is `String`,
+**not** `&'static str`: `GantryEvent` derives `Deserialize` and is round-tripped by
+`tests/events_roundtrip.rs`, and `&'static str` has no owned-data `Deserialize` impl —
+the borrowed-str variant would fail to compile. One allocation per process; irrelevant.
+
+Embedders read the first event of any **successfully-started** run to learn the
+version. Caveat: a CLI-validation failure emits `error{kind:config}` + `result` with no
+`start` at all (`main.rs` validates before emitting `Start`) — exit-4 runs carry no
+contract version, by design.
 
 **Bump policy** (documented in README): semver string. **MAJOR** = remove/rename a field
 or event, or change semantics. **MINOR** = additive field/event/exit-code. This feature
 ships as the initial declared version `1.0`.
-
 ### 2. `error` event enrichment
 
 ```rust
@@ -144,17 +150,26 @@ pub(crate) fn emit_provider_failure(err: &anyhow::Error) -> ExitCode {
 }
 ```
 
-Replace the hand-rolled `GantryEvent::Error { kind: Provider, .. } + ExitCode` at each
-provider-failure site (`single.rs` agent-pass, `team.rs` `structured_call` sites) with a
-call to `emit_provider_failure(&err)`. `loop_mode` inherits via `run_agent_pass`. This
-single-sources the new mapping **and removes the existing duplication** — an in-scope
-cleanup of code we're already touching. `with_retry` is untouched (we re-classify the
-final error at the surface via the existing `classify_error`, the single source of truth).
+Route **provider transport failures only** through it: the `single.rs` agent-pass site
+(~128–140; `loop_mode` inherits via `run_agent_pass`) and team's `structured_call`
+transport site (`team.rs` ~199). This single-sources the mapping and removes the
+existing duplication. `with_retry` is untouched (we re-classify the final error at the
+surface via the existing `classify_error`, the single source of truth).
 
-`TeamCollapse` / `Config` / `Internal` error sites are left as direct
-`GantryEvent::Error` constructions, updated only to pass `recoverable: false,
-retry_after_ms: None`.
+The **second** `structured_call` site (`team.rs` ~230, "no respond tool call and no
+JSON fence") is *not* a transport error: there is no `anyhow::Error` in scope (the
+message is a hand-built constant), and pushing it through the text-matching classifier
+would couple recoverability to the message's wording (today it classifies `Fatal` by
+accident of vocabulary; adding "timeout"/"network" to the string later would silently
+flip it to `recoverable: true`). Leave it a direct `Error` with `recoverable: false,
+retry_after_ms: None`, like `TeamCollapse`.
 
+All other `Error` sites stay direct constructions, updated only to pass
+`recoverable: false, retry_after_ms: None`. Full site list (the compiler enforces this,
+but for the record): `main.rs:~55` (config, pre-`Start`), `tracing_setup.rs:~31` (panic
+hook, internal), `mode/mod.rs::config_error`, `mode/isolation.rs::config_error` **and**
+isolation's diff-capture `Internal` site (~48), `mode/single.rs`, `mode/team.rs` ×3.
+The lone `Start` construction is `main.rs:~68`.
 ## Contract change summary
 
 All additive (no field/event/exit removed or renamed) → consistent with declaring `1.0`:
@@ -167,21 +182,33 @@ All additive (no field/event/exit removed or renamed) → consistent with declar
 
 - **Unit (`mode`):** `emit_provider_failure` over a stub error per class → asserts the
   `(recoverable, retry_after_ms, ExitCode)` triple (RateLimited→true/Some(when hinted)/5;
-  Transient→true/None/Error; Fatal→false/None/Error). `classify_error` itself is already
-  covered in `retry.rs` tests.
-- **Integration:** extend the provider wiremock tests — a `429` response carrying a
-  `retry-after` hint → assert the terminal `error` event has `recoverable: true` +
-  `retry_after_ms`, and the process exits `5`.
+  Transient→true/None/Error; Fatal→false/None/Error). The hint→`Some(ms)` mapping is
+  fully covered **here** — drive it with a message embedding `retry-after=<secs>`.
+  `classify_error` itself is already covered in `retry.rs` tests.
+- **Integration (`tests/main_exit_codes_test.rs` — already drives the real binary and
+  asserts process exits):** wiremock returns `429` on **every** attempt → assert the
+  terminal `error` event has `recoverable: true` and the process exits `5`. Do **not**
+  assert `retry_after_ms` here: the rig adapters drop HTTP headers, and
+  `parse_retry_after` only matches a literal `retry-after=` in the error *message text*
+  (per the retry.rs module docs the hint is for adapters that control their own HTTP
+  layer). Timing: `with_retry` retries the 429 once (`rate_limit_retries: 1`, default
+  delay 1s) before surfacing — the mock must 429 both requests and the test tolerates
+  ~1s. Optional upgrade: if a quick probe shows rig echoes the response **body** into
+  its error text, a body containing `retry-after=1` lets the test also assert
+  `retry_after_ms: Some(1000)` — do not thrash on this if the probe fails.
 - **Roundtrip:** `events_roundtrip` asserts `start` serializes `schema_version: "1.0"`
   and `error` round-trips the two new fields (incl. `retry_after_ms` omitted when `None`).
-
 ## Docs
 
 - README NDJSON event table: `start` gains `schema_version`; `error` gains
   `recoverable`, `retry_after_ms`.
 - README exit-code table: add `5  RateLimited`.
-- A short "Contract versioning" note documenting the bump policy.
-
+- A short "Contract versioning" note documenting the bump policy. Word it as "the
+  first event of any successfully-started run is `start`, carrying `schema_version`" —
+  CLI-validation failures emit `error{config}` with no `start` (see §1 caveat).
+- In-scope while touching the contract: add `"rate_limited" => Ok(ExitCode::RateLimited)`
+  to the expected-exit grammar in `evals/src/assertions.rs` (~513–517); without it no
+  eval can ever assert exit 5 (the catch-all arm rejects the string).
 ## Out of scope / follow-ups
 
 - Opportunity B (`gantry describe` / `--schema`) — would report this same
