@@ -45,11 +45,10 @@ pub async fn run_isolated(mut v: Validated) -> ModeRunOutcome {
     match backend.diff(&lower, &merged).await {
         Ok(diff) => emit_changes(diff.files),
         Err(err) => {
-            let _ = GantryEvent::Error {
-                ts: now_ms(),
-                kind: ErrorKind::Internal,
-                message: format!("--isolate: diff capture failed: {err}"),
-            }
+            let _ = GantryEvent::unrecoverable(
+                ErrorKind::Internal,
+                format!("--isolate: diff capture failed: {err}"),
+            )
             .emit();
         }
     }
@@ -116,12 +115,7 @@ fn emit_changes(files: Vec<pi_iso::FileChange>) {
 
 /// Emit a `config` error and return the corresponding terminal outcome.
 fn config_error(message: &str) -> ModeRunOutcome {
-    let _ = GantryEvent::Error {
-        ts: now_ms(),
-        kind: ErrorKind::Config,
-        message: message.to_string(),
-    }
-    .emit();
+    let _ = GantryEvent::unrecoverable(ErrorKind::Config, message).emit();
     ModeRunOutcome {
         exit: ExitCode::Config,
         meter: MeterSnapshot::default(),

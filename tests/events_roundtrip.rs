@@ -1,4 +1,6 @@
-use gantry::events::{truncate_args, ErrorKind, ExitCode, GantryEvent, TRUNCATE_MARKER};
+use gantry::events::{
+    truncate_args, ErrorKind, ExitCode, GantryEvent, SCHEMA_VERSION, TRUNCATE_MARKER,
+};
 
 fn roundtrip(event: &GantryEvent) {
     let json = serde_json::to_string(event).expect("serialize");
@@ -8,13 +10,20 @@ fn roundtrip(event: &GantryEvent) {
 
 #[test]
 fn start_roundtrip() {
-    roundtrip(&GantryEvent::Start {
+    let event = GantryEvent::Start {
         ts: 1_700_000_000_000,
+        schema_version: SCHEMA_VERSION.to_string(),
         model: "claude-sonnet".into(),
         provider: "anthropic".into(),
         mode: "single".into(),
         workdir: "/tmp/gantry".into(),
-    });
+    };
+    roundtrip(&event);
+    let json = serde_json::to_string(&event).expect("serialize");
+    assert!(
+        json.contains(r#""schema_version":"1.0""#),
+        "start must carry the contract version: {json}"
+    );
 }
 
 #[test]
@@ -140,7 +149,27 @@ fn error_roundtrip() {
         ts: 10,
         kind: ErrorKind::Provider,
         message: "rate limited".into(),
+        recoverable: true,
+        retry_after_ms: Some(30_000),
     });
+}
+
+#[test]
+fn error_retry_after_omitted_when_none() {
+    let event = GantryEvent::Error {
+        ts: 10,
+        kind: ErrorKind::Internal,
+        message: "boom".into(),
+        recoverable: false,
+        retry_after_ms: None,
+    };
+    roundtrip(&event);
+    let json = serde_json::to_string(&event).expect("serialize");
+    assert!(
+        !json.contains("retry_after_ms"),
+        "retry_after_ms must be omitted when None: {json}"
+    );
+    assert!(json.contains(r#""recoverable":false"#), "{json}");
 }
 
 #[test]

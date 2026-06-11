@@ -80,13 +80,44 @@ pub(crate) fn outcome(exit: ExitCode, meter: &TokenMeter) -> ModeRunOutcome {
 
 /// Emit a `config` error event and return the matching terminal outcome.
 pub(crate) fn config_error(meter: &TokenMeter, message: &str) -> ModeRunOutcome {
+    let _ = GantryEvent::unrecoverable(ErrorKind::Config, message).emit();
+    outcome(ExitCode::Config, meter)
+}
+
+/// Map a terminal provider failure (retries already exhausted) to the
+/// embedder contract: `(recoverable, retry_after_ms, exit)`. Reuses
+/// [`classify_error`](crate::provider::retry::classify_error) — the single
+/// source of error classification.
+fn map_provider_failure(err: &anyhow::Error) -> (bool, Option<u64>, ExitCode) {
+    use crate::provider::retry::{classify_error, ErrorClass};
+    match classify_error(err) {
+        ErrorClass::RateLimited { retry_after } => (
+            true,
+            // Saturate: the hint text is provider-controlled, and a u64::MAX-seconds
+            // hint would otherwise truncate to garbage milliseconds.
+            retry_after.map(|d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX)),
+            ExitCode::RateLimited,
+        ),
+        ErrorClass::Transient => (true, None, ExitCode::Error),
+        ErrorClass::Fatal => (false, None, ExitCode::Error),
+    }
+}
+
+/// Emit the `error{kind:provider}` event for a terminal provider failure and
+/// return the exit code the run should end with. Single-sources the
+/// provider-failure contract for `single`/`loop` (via `run_agent_pass`) and
+/// team's `structured_call` transport site.
+pub(crate) fn emit_provider_failure(err: &anyhow::Error) -> ExitCode {
+    let (recoverable, retry_after_ms, exit) = map_provider_failure(err);
     let _ = GantryEvent::Error {
         ts: now_ms(),
-        kind: ErrorKind::Config,
-        message: message.to_string(),
+        kind: ErrorKind::Provider,
+        message: format!("{err:#}"),
+        recoverable,
+        retry_after_ms,
     }
     .emit();
-    outcome(ExitCode::Config, meter)
+    exit
 }
 
 /// Entry point: run the selected mode, transparently wrapping it in copy-on-write
@@ -106,5 +137,50 @@ pub(crate) async fn dispatch(v: Validated) -> ModeRunOutcome {
         Mode::Single => single::run_single(v).await,
         Mode::Team => team::run_team(v).await,
         Mode::Loop => loop_mode::run_loop(v).await,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use anyhow::anyhow;
+
+    #[test]
+    fn rate_limited_with_hint_maps_to_exit_5_and_delay() {
+        let err = anyhow!("429 too many requests; retry-after=30");
+        assert_eq!(
+            map_provider_failure(&err),
+            (true, Some(30_000), ExitCode::RateLimited)
+        );
+    }
+
+    #[test]
+    fn absurd_provider_controlled_hint_saturates_instead_of_truncating() {
+        let err = anyhow!("429; retry-after=18446744073709551615");
+        assert_eq!(
+            map_provider_failure(&err),
+            (true, Some(u64::MAX), ExitCode::RateLimited)
+        );
+    }
+
+    #[test]
+    fn rate_limited_without_hint_maps_to_exit_5_no_delay() {
+        let err = anyhow!("rate limit exceeded");
+        assert_eq!(
+            map_provider_failure(&err),
+            (true, None, ExitCode::RateLimited)
+        );
+    }
+
+    #[test]
+    fn transient_maps_to_recoverable_error_exit() {
+        let err = anyhow!("503 service unavailable");
+        assert_eq!(map_provider_failure(&err), (true, None, ExitCode::Error));
+    }
+
+    #[test]
+    fn fatal_maps_to_unrecoverable_error_exit() {
+        let err = anyhow!("401 unauthorized");
+        assert_eq!(map_provider_failure(&err), (false, None, ExitCode::Error));
     }
 }
