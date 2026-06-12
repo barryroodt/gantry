@@ -220,6 +220,10 @@ mise exec -- cargo fmt --check
 mise exec -- cargo clippy --workspace --all-targets -- -D warnings
 ```
 
+## Benchmarks
+
+[`bench/`](bench/) benchmarks gantry against other agent harnesses (Claude Code, Pi) on identical tasks through a recording reverse proxy, so tokens, cost, model calls, and tool calls are measured uniformly from the wire — never from harness self-reporting — and output quality is gated by programmatic checks plus a blinded LLM judge. See [`bench/README.md`](bench/README.md) for the fairness protocol and how to run it.
+
 ## License
 
 Licensed under the [Apache License, Version 2.0](LICENSE). See [NOTICE](NOTICE) for attributions.
