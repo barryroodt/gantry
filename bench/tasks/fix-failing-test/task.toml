@@ -1,0 +1,63 @@
+# Repo: BurntSushi/rust-csv — Unlicense OR MIT, small-mid, stable history.
+# Real bug, present at the pinned SHA: when the underlying reader returns an
+# I/O error, the CSV record iterators keep re-reading and yield the same
+# error forever instead of stopping (upstream issue #207). Fixed upstream by
+# commit d1a69a0bf13317b845b618cebdae4aa7f9d851b8 ("api: iteration should
+# stop after I/O error"), whose src/reader.rs change introduces a
+# ReaderEofState that treats an I/O error as EOF for subsequent reads.
+# SHA below = 7120114..., the direct parent of that fix commit.
+#
+# The named test (`no_infinite_loop_on_io_errors`) is the regression test
+# the upstream fix itself added to tests/tests.rs; the grader injects a
+# standalone copy as tests/bench_regression.rs and runs it (the plan's
+# prompt-referenced patch-step variant: a plain pinned SHA where this test
+# pre-exists red could not be sourced from a CI-gated upstream history).
+# Injection at grade time also means a harness cannot tamper with the test:
+# the workspace diff is captured before grading, and diff_must_not_touch
+# rejects any run that wrote into tests/ itself.
+#
+# Verified locally at the pinned checkout, toolchain rust 1.96:
+#   - with the injected test file, `cargo test --test bench_regression`
+#     FAILS (assertion `record_results.next().is_none()` — second next()
+#     yields the same I/O error again).
+#   - after applying upstream d1a69a0's src/reader.rs change (and nothing
+#     else), the same command PASSES.
+id = "fix-failing-test"
+kind = "mutate"
+
+[workspace]
+repo_url = "https://github.com/BurntSushi/rust-csv.git"
+sha = "71201147b6e10abaeaf72a8dc3438e38802199f6"
+
+[grading]
+# Writes the canonical failing test (verbatim from the prompt, adapted from
+# the upstream fix's regression test) and runs it. Exit 0 = the harness
+# fixed the library source.
+check_command = '''
+mkdir -p tests && cat > tests/bench_regression.rs <<'EOF'
+use std::io::{self, Read};
+
+use csv::Reader;
+
+#[test]
+fn no_infinite_loop_on_io_errors() {
+    struct FailingRead;
+    impl Read for FailingRead {
+        fn read(&mut self, _buf: &mut [u8]) -> io::Result<usize> {
+            Err(io::Error::new(io::ErrorKind::Other, "Broken reader"))
+        }
+    }
+
+    let mut record_results = Reader::from_reader(FailingRead).into_records();
+    let first_result = record_results.next();
+    assert!(
+        matches!(&first_result, Some(Err(e)) if matches!(e.kind(), csv::ErrorKind::Io(_)))
+    );
+    assert!(record_results.next().is_none());
+}
+EOF
+cargo test --quiet --test bench_regression
+'''
+# The fix must live in the library source; the harness must not write any
+# tests itself (the grader supplies the test after the diff is captured).
+diff_must_not_touch = ["tests/**"]

@@ -1,0 +1,25 @@
+# Repo: BurntSushi/ripgrep — MIT OR Unlicense, mid-size, very stable history.
+# Real bug, present at the pinned SHA: the JSON printer's summary statistics
+# only aggregate files that contained at least one match, because
+# `JSONSink::finish()` in crates/printer/src/json.rs returns early on
+# `!self.begin_printed` BEFORE tallying stats (searches, bytes_searched, ...).
+# Reported in discussion BurntSushi/ripgrep#3178; fixed upstream by commit
+# 63209ae0b95d31f28d14be5125fba3f61f5835e6 (PR #3190), which moves the
+# early-return below the stats tally.
+# SHA below = b610d1c..., the direct parent of the fix commit, so the bug is
+# the last unfixed state. Verified locally: `git show
+# b610d1c:crates/printer/src/json.rs` shows the early return at the top of
+# finish(); the fix diff relocates it after the stats updates.
+# Workspace materialization re-inits history, so the fix commit cannot be
+# mined from the checkout.
+id = "locate-bug"
+kind = "locate"
+
+[workspace]
+repo_url = "https://github.com/BurntSushi/ripgrep.git"
+sha = "b610d1cb1506feab33459c5853e4c0d0cb16a6e2"
+
+[grading]
+# The root-cause file and method. Both verified present in the ground-truth
+# answer derived from the upstream fix.
+answer_contains = ["json\\.rs", "(?i)finish"]
