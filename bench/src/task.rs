@@ -125,9 +125,32 @@ impl Task {
     }
 }
 
-/// Default task suite location: `bench/tasks/`.
+/// Env var overriding the task suite location (container/installed runs where
+/// the compile-time `CARGO_MANIFEST_DIR` path does not exist).
+pub const TASKS_DIR_ENV: &str = "GANTRY_BENCH_TASKS_DIR";
+
+/// Default task suite location: `$GANTRY_BENCH_TASKS_DIR`, else `bench/tasks/`.
 pub fn default_tasks_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("tasks")
+    tasks_dir_or_default(std::env::var(TASKS_DIR_ENV).ok())
+}
+
+fn tasks_dir_or_default(value: Option<String>) -> PathBuf {
+    match value {
+        Some(v) if !v.trim().is_empty() => PathBuf::from(v.trim()),
+        _ => Path::new(env!("CARGO_MANIFEST_DIR")).join("tasks"),
+    }
+}
+
+/// Env var overriding the shared clone-cache root (container/installed runs).
+pub const CACHE_DIR_ENV: &str = "GANTRY_BENCH_CACHE_DIR";
+
+fn cache_dir_or_default(value: Option<String>) -> PathBuf {
+    match value {
+        Some(v) if !v.trim().is_empty() => PathBuf::from(v.trim()),
+        _ => Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join(".cache")
+            .join("repos"),
+    }
 }
 
 /// Load a single task from its directory (`<dir>/task.toml` + `prompt.md` +
@@ -215,13 +238,10 @@ impl RepoCache {
         Self { root: root.into() }
     }
 
-    /// The shared on-disk cache, `bench/.cache/repos` (gitignored).
+    /// The shared on-disk cache: `$GANTRY_BENCH_CACHE_DIR`, else
+    /// `bench/.cache/repos` (gitignored).
     pub fn shared() -> Self {
-        Self::new(
-            Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join(".cache")
-                .join("repos"),
-        )
+        Self::new(cache_dir_or_default(std::env::var(CACHE_DIR_ENV).ok()))
     }
 
     /// Materialize a fresh, independent workspace at the pinned SHA.
@@ -427,4 +447,33 @@ fn git(args: &[&str], cwd: Option<&Path>) -> Result<String> {
 fn path_str(path: &Path) -> Result<&str> {
     path.to_str()
         .with_context(|| format!("non-UTF-8 path {}", path.display()))
+}
+
+#[cfg(test)]
+mod env_override_tests {
+    use super::*;
+
+    #[test]
+    fn tasks_dir_env_override_and_fallback() {
+        assert_eq!(
+            tasks_dir_or_default(Some("/opt/tasks".into())),
+            PathBuf::from("/opt/tasks")
+        );
+        let fallback = Path::new(env!("CARGO_MANIFEST_DIR")).join("tasks");
+        assert_eq!(tasks_dir_or_default(None), fallback);
+        assert_eq!(tasks_dir_or_default(Some("  ".into())), fallback);
+    }
+
+    #[test]
+    fn cache_dir_env_override_and_fallback() {
+        assert_eq!(
+            cache_dir_or_default(Some("/var/cache/gb".into())),
+            PathBuf::from("/var/cache/gb")
+        );
+        let fallback = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join(".cache")
+            .join("repos");
+        assert_eq!(cache_dir_or_default(None), fallback);
+        assert_eq!(cache_dir_or_default(Some(String::new())), fallback);
+    }
 }

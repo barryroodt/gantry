@@ -134,8 +134,16 @@ pub fn default_out_dir() -> PathBuf {
         .join(ts)
 }
 
-/// Git SHA of this gantry checkout, `"unknown"` when undeterminable.
+/// Env var overriding [`gantry_sha`] (container images bake the SHA at build
+/// time; the runtime stage has no git checkout to ask).
+pub const SHA_ENV: &str = "GANTRY_BENCH_SHA";
+
+/// Git SHA of this gantry checkout: `$GANTRY_BENCH_SHA` when set, else
+/// `git rev-parse HEAD`, else `"unknown"`.
 pub fn gantry_sha() -> String {
+    if let Some(sha) = sha_from_env(std::env::var(SHA_ENV).ok()) {
+        return sha;
+    }
     std::process::Command::new("git")
         .args(["rev-parse", "HEAD"])
         .current_dir(env!("CARGO_MANIFEST_DIR"))
@@ -146,6 +154,12 @@ pub fn gantry_sha() -> String {
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| "unknown".to_string())
+}
+
+fn sha_from_env(value: Option<String>) -> Option<String> {
+    value
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
 }
 
 // ---------------------------------------------------------------------------
@@ -449,4 +463,19 @@ async fn kill_tree(child: &mut tokio::process::Child, pid: Option<u32>) {
 fn tail_lossy(bytes: &[u8], max: usize) -> String {
     let start = bytes.len().saturating_sub(max);
     String::from_utf8_lossy(&bytes[start..]).into_owned()
+}
+
+#[cfg(test)]
+mod env_override_tests {
+    use super::sha_from_env;
+
+    #[test]
+    fn sha_env_override_and_fallthrough() {
+        assert_eq!(
+            sha_from_env(Some("abc123 ".into())).as_deref(),
+            Some("abc123")
+        );
+        assert_eq!(sha_from_env(Some("  ".into())), None);
+        assert_eq!(sha_from_env(None), None);
+    }
 }
