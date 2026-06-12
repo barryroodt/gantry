@@ -23,6 +23,34 @@ GANTRY_BENCH_UPSTREAM=http://127.0.0.1:18099 mise exec -- cargo run -p gantry-be
 
 Artifacts land in `bench/results/<UTC timestamp>/` (override with `--out`): `raw/<task>-<harness>-r<rep>.json` written as each run finishes, plus `results.json` and `report.md` assembled at the end. One keyless smoke output is committed at [`results/sample/`](results/sample/).
 
+## Docker (no local dev environment)
+
+`bench/docker/` packages everything — gantry, gantry-bench, the mock upstream, and the pinned competitor CLIs — into one image. You need Docker and (for live runs) an API key; no Rust toolchain, no mise, no CLI installs.
+
+```sh
+# Build from the repo root (pins: RUST_VERSION, CLAUDE_CODE_VERSION, OMP_VERSION, BUN_VERSION)
+docker build -f bench/docker/Dockerfile -t gantry-bench \
+    --build-arg GANTRY_SHA="$(git rev-parse HEAD)" .
+
+# Keyless smoke (in-container mock upstream)
+docker run --rm -v "$PWD/bench-results:/results" gantry-bench smoke
+
+# Live benchmark
+docker run --rm -e ANTHROPIC_API_KEY -v "$PWD/bench-results:/results" \
+    gantry-bench live --model <dated-model-id> [--task ID]... [--harness NAME]... [--reps N]
+```
+
+Results land in the mounted `/results` volume under a UTC-timestamped directory. Files are written as root by default; pass `--user "$(id -u)"` if that matters on your host. The image bakes these env overrides (also usable outside Docker for installed binaries):
+
+| Env var | Purpose |
+|---|---|
+| `GANTRY_BENCH_TASKS_DIR` | task suite location (image: `/opt/gantry-bench/tasks`) |
+| `GANTRY_BENCH_CACHE_DIR` | repo clone cache (image: `/var/cache/gantry-bench`) |
+| `GANTRY_BENCH_SHA` | gantry SHA recorded in results (image: baked at build) |
+| `GANTRY_BENCH_GANTRY_BIN` | gantry binary path (image: `/usr/local/bin/gantry`) |
+
+Version pins are `--build-arg`s with reviewed defaults in the Dockerfile — bumping a competitor CLI changes what the benchmark measures, so treat it like the price table: one-line change, reviewed. CI runs the keyless smoke in this image on every PR (`bench-docker-smoke` job).
+
 ## Fairness protocol
 
 1. Same pinned dated model id, same verbatim prompt, same workspace SHA for every harness.
