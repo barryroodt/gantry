@@ -29,7 +29,12 @@ pub struct Price {
 }
 
 const fn price(input: f64, output: f64, cache_write: f64, cache_read: f64) -> Price {
-    Price { input, output, cache_write, cache_read }
+    Price {
+        input,
+        output,
+        cache_write,
+        cache_read,
+    }
 }
 
 /// Model-family → price, exact-matched after [`normalize`] strips a trailing

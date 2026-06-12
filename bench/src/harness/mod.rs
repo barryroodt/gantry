@@ -4,7 +4,9 @@
 //! Fairness contract (spec §Fairness): every adapter receives the same
 //! [`RunCtx`] — same pinned model, same verbatim prompt file, same workspace —
 //! and wires its process to the recording proxy with hermetic config dirs and
-//! API-key-only auth. Stdout is used ONLY for answer extraction; all
+//! API-key-only auth. Every adapter builds on [`hermetic_command`], so the
+//! spawned harness sees NO inherited environment beyond an explicit allowlist
+//! (fairness §2/§5). Stdout is used ONLY for answer extraction; all
 //! efficiency metrics come from the proxy ledger (invariant 1).
 
 use std::ffi::OsStr;
@@ -74,23 +76,43 @@ pub trait Harness {
 
 /// All benchmarked harnesses, in canonical report order.
 pub fn all() -> Vec<Box<dyn Harness>> {
-    vec![
-        Box::new(Gantry::new()),
-        Box::new(ClaudeCode),
-        Box::new(Pi),
-    ]
+    vec![Box::new(Gantry::new()), Box::new(ClaudeCode), Box::new(Pi)]
+}
+
+/// Hermetic base command shared by every adapter: cwd = the disposable
+/// workspace, environment cleared, then an explicit allowlist re-added.
+///
+/// Allowlist > denylist (fairness §2/§5): inheriting the parent env and
+/// scrubbing known-bad names breaks the moment a provider adds another
+/// precedence-taking auth var (`ANTHROPIC_AUTH_TOKEN`, `*_OAUTH_TOKEN`, …) or
+/// a knob like `ANTHROPIC_MODEL` / `HTTP(S)_PROXY` bleeds in. Cleared away
+/// here, none of them can reach the harness; adapters add back exactly the
+/// vars their harness needs.
+///
+/// Allowlisted:
+/// - `PATH`, `TMPDIR` — inherited verbatim; binary resolution and tempfiles.
+/// - `HOME` — pointed at the hermetic per-run config dir, so dotfile
+///   fallbacks (`~/.gitconfig`, `~/.claude*`, `~/.omp`, …) can never reach
+///   the user's real home.
+pub fn hermetic_command(program: impl AsRef<OsStr>, ctx: &RunCtx) -> Command {
+    let mut cmd = Command::new(program);
+    cmd.current_dir(&ctx.workspace);
+    cmd.env_clear();
+    for key in ["PATH", "TMPDIR"] {
+        if let Some(value) = std::env::var_os(key) {
+            cmd.env(key, value);
+        }
+    }
+    cmd.env("HOME", &ctx.config_dir);
+    cmd
 }
 
 /// Read the verbatim prompt for adapters that pass it as an argv argument.
 ///
 /// Panics on an unreadable file — see [`Harness::command`].
 pub(crate) fn read_prompt(ctx: &RunCtx) -> String {
-    std::fs::read_to_string(&ctx.prompt_file).unwrap_or_else(|e| {
-        panic!(
-            "prompt file {} unreadable: {e}",
-            ctx.prompt_file.display()
-        )
-    })
+    std::fs::read_to_string(&ctx.prompt_file)
+        .unwrap_or_else(|e| panic!("prompt file {} unreadable: {e}", ctx.prompt_file.display()))
 }
 
 /// Best-effort version probe: run `program args…`, return the first non-empty

@@ -6,9 +6,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use gantry_bench::grade::DEFAULT_JUDGE_THRESHOLD;
 use gantry_bench::task::{
-    load_task, load_tasks, RepoCache, TaskKind, TaskManifest, WorkspaceSpec,
-    DEFAULT_JUDGE_THRESHOLD, DEFAULT_TIMEOUT_MS,
+    load_task, load_tasks, RepoCache, TaskKind, TaskManifest, WorkspaceSpec, DEFAULT_TIMEOUT_MS,
 };
 use tempfile::TempDir;
 
@@ -81,7 +81,10 @@ fn fixture_origin(root: &Path) -> (PathBuf, String, String) {
 }
 
 fn spec(origin: &Path, sha: &str) -> WorkspaceSpec {
-    WorkspaceSpec { repo_url: origin.to_str().unwrap().to_owned(), sha: sha.to_owned() }
+    WorkspaceSpec {
+        repo_url: origin.to_str().unwrap().to_owned(),
+        sha: sha.to_owned(),
+    }
 }
 
 fn fake_sha() -> String {
@@ -139,10 +142,13 @@ diff_must_not_touch = ["tests/**"]
     assert_eq!(m.workspace.repo_url, "https://example.com/repo.git");
     assert_eq!(m.workspace.sha, sha);
     assert_eq!(m.grading.judge_threshold, 7.5);
-    assert_eq!(m.grading.answer_contains, vec![r"src/[a-z]+\.rs", "root cause"]);
+    assert_eq!(
+        m.grading.answer_contains,
+        vec![r"src/[a-z]+\.rs", "root cause"]
+    );
     assert_eq!(m.grading.check_command.as_deref(), Some("cargo test -q"));
-    assert_eq!(m.grading.diff_contains, Some(vec!["fn alpha".to_owned()]));
-    assert_eq!(m.grading.diff_must_not_touch, Some(vec!["tests/**".to_owned()]));
+    assert_eq!(m.grading.diff_contains, vec!["fn alpha".to_owned()]);
+    assert_eq!(m.grading.diff_must_not_touch, vec!["tests/**".to_owned()]);
 }
 
 #[test]
@@ -153,8 +159,8 @@ fn minimal_manifest_gets_contract_defaults() {
     assert_eq!(m.grading.judge_threshold, DEFAULT_JUDGE_THRESHOLD);
     assert!(m.grading.answer_contains.is_empty());
     assert_eq!(m.grading.check_command, None);
-    assert_eq!(m.grading.diff_contains, None);
-    assert_eq!(m.grading.diff_must_not_touch, None);
+    assert!(m.grading.diff_contains.is_empty());
+    assert!(m.grading.diff_must_not_touch.is_empty());
 }
 
 #[test]
@@ -167,7 +173,10 @@ fn missing_id_is_rejected_naming_the_field() {
 fn invalid_kind_is_rejected_listing_valid_variants() {
     let toml_str = minimal_manifest("t").replace("kind = \"explore\"", "kind = \"poke\"");
     let err = parse_err(&toml_str);
-    assert!(err.contains("poke"), "error should quote the bad value: {err}");
+    assert!(
+        err.contains("poke"),
+        "error should quote the bad value: {err}"
+    );
     assert!(
         err.contains("explore") && err.contains("locate") && err.contains("mutate"),
         "error should list valid kinds: {err}"
@@ -200,29 +209,39 @@ fn zero_timeout_is_rejected_naming_the_field() {
 
 #[test]
 fn empty_repo_url_is_rejected_naming_the_field() {
-    let toml_str =
-        minimal_manifest("t").replace("repo_url = \"https://example.com/fixture.git\"", "repo_url = \"\"");
+    let toml_str = minimal_manifest("t").replace(
+        "repo_url = \"https://example.com/fixture.git\"",
+        "repo_url = \"\"",
+    );
     assert!(parse_err(&toml_str).contains("workspace.repo_url"));
 }
 
 #[test]
 fn invalid_answer_regex_is_rejected_naming_the_field() {
-    let toml_str = format!("{}\n[grading]\nanswer_contains = [\"[\"]\n", minimal_manifest("t"));
+    let toml_str = format!(
+        "{}\n[grading]\nanswer_contains = [\"[\"]\n",
+        minimal_manifest("t")
+    );
     let err = parse_err(&toml_str);
     assert!(err.contains("answer_contains"), "{err}");
 }
 
 #[test]
 fn invalid_diff_glob_is_rejected_naming_the_field() {
-    let toml_str =
-        format!("{}\n[grading]\ndiff_must_not_touch = [\"tests/[\"]\n", minimal_manifest("t"));
+    let toml_str = format!(
+        "{}\n[grading]\ndiff_must_not_touch = [\"tests/[\"]\n",
+        minimal_manifest("t")
+    );
     let err = parse_err(&toml_str);
     assert!(err.contains("diff_must_not_touch"), "{err}");
 }
 
 #[test]
 fn out_of_range_judge_threshold_is_rejected_naming_the_field() {
-    let toml_str = format!("{}\n[grading]\njudge_threshold = 10.5\n", minimal_manifest("t"));
+    let toml_str = format!(
+        "{}\n[grading]\njudge_threshold = 10.5\n",
+        minimal_manifest("t")
+    );
     assert!(parse_err(&toml_str).contains("judge_threshold"));
 }
 
@@ -230,6 +249,16 @@ fn out_of_range_judge_threshold_is_rejected_naming_the_field() {
 fn unknown_field_is_rejected_naming_the_field() {
     let toml_str = format!("timout_ms = 5\n{}", minimal_manifest("t"));
     assert!(parse_err(&toml_str).contains("timout_ms"));
+}
+
+#[test]
+fn unknown_grading_field_is_rejected_naming_the_field() {
+    // deny_unknown_fields holds on the embedded [grading] table too.
+    let toml_str = format!(
+        "{}\n[grading]\njudge_treshold = 5.0\n",
+        minimal_manifest("t")
+    );
+    assert!(parse_err(&toml_str).contains("judge_treshold"));
 }
 
 // ---------------------------------------------------------------------------
@@ -257,7 +286,10 @@ fn loader_scans_task_dirs_sorted_with_optional_rubric() {
 
     let tasks = load_tasks(root.path()).unwrap();
     assert_eq!(
-        tasks.iter().map(|t| t.manifest.id.as_str()).collect::<Vec<_>>(),
+        tasks
+            .iter()
+            .map(|t| t.manifest.id.as_str())
+            .collect::<Vec<_>>(),
         ["alpha-task", "beta-task"],
         "sorted by id"
     );
@@ -274,7 +306,10 @@ fn loader_rejects_task_dir_without_manifest() {
     make_task_dir(root.path(), "ok-task", None);
     fs::create_dir(root.path().join("stray-dir")).unwrap();
     let err = format!("{:#}", load_tasks(root.path()).unwrap_err());
-    assert!(err.contains("task.toml") && err.contains("stray-dir"), "{err}");
+    assert!(
+        err.contains("task.toml") && err.contains("stray-dir"),
+        "{err}"
+    );
 }
 
 #[test]
@@ -284,7 +319,10 @@ fn load_task_rejects_id_directory_mismatch() {
     write(&dir.join("task.toml"), &minimal_manifest("delta-task"));
     write(&dir.join("prompt.md"), "p\n");
     let err = format!("{:#}", load_task(&dir).unwrap_err());
-    assert!(err.contains("delta-task") && err.contains("gamma-task"), "{err}");
+    assert!(
+        err.contains("delta-task") && err.contains("gamma-task"),
+        "{err}"
+    );
 }
 
 #[test]
@@ -297,7 +335,10 @@ fn load_task_requires_nonempty_prompt() {
 
     write(&dir.join("prompt.md"), "  \n");
     let err = format!("{:#}", load_task(&dir).unwrap_err());
-    assert!(err.contains("prompt.md") && err.contains("non-empty"), "{err}");
+    assert!(
+        err.contains("prompt.md") && err.contains("non-empty"),
+        "{err}"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -313,14 +354,21 @@ fn materializes_pinned_sha_with_single_commit_history() {
     let ws = cache.materialize(&spec(&origin, &sha1)).unwrap();
     assert_eq!(read(&ws.path().join("src/lib.rs")), LIB_V1);
     assert_eq!(read(&ws.path().join("README.md")), "fixture readme v1\n");
-    assert!(!ws.path().join("docs/notes.md").exists(), "later commit must not leak in");
+    assert!(
+        !ws.path().join("docs/notes.md").exists(),
+        "later commit must not leak in"
+    );
 
     // Upstream history is stripped: exactly one baseline commit, so the
     // harness cannot mine `git log` for answers.
     let count = git(ws.path(), &["rev-list", "--count", "HEAD"]);
     assert_eq!(count.trim(), "1");
 
-    assert_eq!(ws.diff().unwrap(), "", "fresh workspace must have an empty diff");
+    assert_eq!(
+        ws.diff().unwrap(),
+        "",
+        "fresh workspace must have an empty diff"
+    );
 }
 
 #[test]
@@ -346,16 +394,26 @@ fn materializations_are_independent_and_diff_tracks_changes() {
     let ws2 = cache.materialize(&spec(&origin, &sha1)).unwrap();
     assert_ne!(ws1.path(), ws2.path());
 
-    write(&ws1.path().join("README.md"), "fixture readme v1\nchanged by harness\n");
+    write(
+        &ws1.path().join("README.md"),
+        "fixture readme v1\nchanged by harness\n",
+    );
     write(&ws1.path().join("src/new_file.txt"), "brand new\n");
 
     let diff1 = ws1.diff().unwrap();
     assert!(diff1.contains("+changed by harness"), "{diff1}");
-    assert!(diff1.contains("src/new_file.txt"), "new untracked files must appear: {diff1}");
+    assert!(
+        diff1.contains("src/new_file.txt"),
+        "new untracked files must appear: {diff1}"
+    );
     // diff() is idempotent.
     assert_eq!(ws1.diff().unwrap(), diff1);
 
-    assert_eq!(ws2.diff().unwrap(), "", "sibling workspace must be untouched");
+    assert_eq!(
+        ws2.diff().unwrap(),
+        "",
+        "sibling workspace must be untouched"
+    );
     assert_eq!(read(&ws2.path().join("README.md")), "fixture readme v1\n");
     assert!(!ws2.path().join("src/new_file.txt").exists());
 }
@@ -372,7 +430,10 @@ fn diff_respects_workspace_gitignore() {
 
     let diff = ws.diff().unwrap();
     assert!(diff.contains("src/extra.rs"), "{diff}");
-    assert!(!diff.contains("junk.txt"), "gitignored artifacts must stay out of the diff: {diff}");
+    assert!(
+        !diff.contains("junk.txt"),
+        "gitignored artifacts must stay out of the diff: {diff}"
+    );
 }
 
 #[test]
@@ -393,7 +454,10 @@ fn cached_sha_needs_no_origin_contact() {
     // A SHA the cache does not have forces a fetch, which now fails loudly
     // and names the commit.
     let missing = fake_sha();
-    let err = format!("{:#}", cache.materialize(&spec(&origin, &missing)).unwrap_err());
+    let err = format!(
+        "{:#}",
+        cache.materialize(&spec(&origin, &missing)).unwrap_err()
+    );
     assert!(err.contains(&missing), "{err}");
 }
 
@@ -421,6 +485,9 @@ fn unknown_sha_errors_after_fetch_naming_the_commit() {
     let cache = RepoCache::new(root.path().join("cache"));
 
     let missing = fake_sha();
-    let err = format!("{:#}", cache.materialize(&spec(&origin, &missing)).unwrap_err());
+    let err = format!(
+        "{:#}",
+        cache.materialize(&spec(&origin, &missing)).unwrap_err()
+    );
     assert!(err.contains(&missing) && err.contains("not found"), "{err}");
 }

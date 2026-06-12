@@ -19,8 +19,7 @@ fn task<'a>(tasks: &'a [Task], id: &str) -> &'a Task {
 #[test]
 fn suite_loads_all_six_tasks_sorted_by_id() {
     let tasks = suite();
-    let ids: Vec<&str> =
-        tasks.iter().map(|t| t.manifest.id.as_str()).collect();
+    let ids: Vec<&str> = tasks.iter().map(|t| t.manifest.id.as_str()).collect();
     assert_eq!(
         ids,
         [
@@ -74,10 +73,8 @@ fn programmatic_grading_specs_are_wired() {
     for id in ["targeted-edit", "fix-failing-test"] {
         let grading = &task(&tasks, id).manifest.grading;
         assert!(grading.check_command.is_some(), "{id} needs check_command");
-        let globs = grading
-            .diff_must_not_touch
-            .as_deref()
-            .unwrap_or_else(|| panic!("{id} needs diff_must_not_touch"));
+        let globs = &grading.diff_must_not_touch;
+        assert!(!globs.is_empty(), "{id} needs diff_must_not_touch");
         assert!(
             globs.iter().any(|g| g == "tests/**"),
             "{id} must shield tests/ from harness edits"

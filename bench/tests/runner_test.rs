@@ -10,9 +10,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command as StdCommand;
 
+use gantry_bench::grade::GradeSpec;
 use gantry_bench::harness::{Harness, RunCtx};
 use gantry_bench::runner::{self, RunnerConfig};
-use gantry_bench::task::{GradingSpec, RepoCache, Task, TaskKind, TaskManifest, WorkspaceSpec};
+use gantry_bench::task::{RepoCache, Task, TaskKind, TaskManifest, WorkspaceSpec};
 use gantry_bench::types::{RunOutcome, RunRecord, Usage};
 use tempfile::TempDir;
 use wiremock::matchers::{method, path};
@@ -73,7 +74,7 @@ fn mem_task(
     timeout_ms: u64,
     origin: &Path,
     sha: &str,
-    grading: GradingSpec,
+    grading: GradeSpec,
 ) -> Task {
     Task {
         manifest: TaskManifest {
@@ -223,9 +224,9 @@ async fn matrix_end_to_end_with_fake_harness() {
     let root = TempDir::with_prefix("runner-e2e-").unwrap();
     let (origin, sha) = fixture_origin(root.path());
 
-    let grading = GradingSpec {
+    let grading = GradeSpec {
         answer_contains: vec![KNOWN_ANSWER.to_string()],
-        ..GradingSpec::default()
+        ..GradeSpec::default()
     };
     let tasks = vec![
         mem_task(
@@ -246,7 +247,7 @@ async fn matrix_end_to_end_with_fake_harness() {
             750,
             &origin,
             &sha,
-            GradingSpec::default(),
+            GradeSpec::default(),
         ),
         mem_task(
             "t3-after",
@@ -255,7 +256,7 @@ async fn matrix_end_to_end_with_fake_harness() {
             10_000,
             &origin,
             &sha,
-            GradingSpec::default(),
+            GradeSpec::default(),
         ),
         mem_task(
             "t4-exit3",
@@ -264,7 +265,7 @@ async fn matrix_end_to_end_with_fake_harness() {
             10_000,
             &origin,
             &sha,
-            GradingSpec::default(),
+            GradeSpec::default(),
         ),
     ];
 
@@ -293,7 +294,11 @@ async fn matrix_end_to_end_with_fake_harness() {
     );
 
     // Ledger populated from the proxy tee, not from harness output.
-    assert_eq!(t1.run.ledger.entries.len(), 1, "exactly one tracked exchange");
+    assert_eq!(
+        t1.run.ledger.entries.len(),
+        1,
+        "exactly one tracked exchange"
+    );
     let entry = &t1.run.ledger.entries[0];
     assert_eq!(entry.model, "claude-fake-1");
     assert_eq!(entry.status, 200);
@@ -388,10 +393,12 @@ async fn spawn_failure_is_crashed_and_persisted() {
         5_000,
         &origin,
         &sha,
-        GradingSpec::default(),
+        GradeSpec::default(),
     )];
     let cfg = config(&root, mock.uri(), tasks, vec![Box::new(BrokenHarness)]);
-    let records = runner::run_suite(&cfg).await.expect("suite survives spawn failure");
+    let records = runner::run_suite(&cfg)
+        .await
+        .expect("suite survives spawn failure");
 
     assert_eq!(records.len(), 1);
     let rec = &records[0];
@@ -421,7 +428,7 @@ fn kind_task(id: &str, kind: TaskKind) -> Task {
         1_000,
         Path::new("/nonexistent"),
         "0000000000000000000000000000000000000000",
-        GradingSpec::default(),
+        GradeSpec::default(),
     )
 }
 
@@ -446,7 +453,10 @@ fn smoke_requires_an_explore_task() {
     let err = runner::smoke_selection(tasks, gantry_bench::harness::all())
         .err()
         .expect("selection must fail without an explore task");
-    assert!(err.to_string().contains("explore"), "names the gap: {err:#}");
+    assert!(
+        err.to_string().contains("explore"),
+        "names the gap: {err:#}"
+    );
 }
 
 #[test]

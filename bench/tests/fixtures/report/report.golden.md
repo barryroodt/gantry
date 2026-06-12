@@ -28,7 +28,7 @@ All efficiency metrics come from the recording proxy ledger — never from harne
 ## Transparency
 
 - Untracked traffic (non-`/v1/messages` requests, forwarded unparsed): gantry: 0 req / 0 B; claude-code: 3 req / 5120 B
-- Judge bookkeeping: 5 of 7 graded runs carry a judge score; judge calls bypass the recording proxy and are excluded from every metric above.
+- Judge bookkeeping: 5 of 7 graded runs carry a judge score (5845 in / 295 out judge tokens); judge calls bypass the recording proxy and are excluded from every metric above.
 
 ---
 

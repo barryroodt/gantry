@@ -407,6 +407,8 @@ impl RequestMeta {
                 .get("messages")
                 .and_then(Value::as_array)
                 .map_or(0, |m| m.len() as u32),
+            // Normalized (compact re-serialized) size, deliberately not
+            // on-wire bytes — see the `LedgerEntry::tools_bytes` field doc.
             tools_bytes: v
                 .get("tools")
                 .map_or(0, |t| serde_json::to_vec(t).map_or(0, |b| b.len() as u64)),
@@ -544,6 +546,11 @@ fn parse_json_response(body: &[u8]) -> ParsedResponse {
 /// final `stop_reason` and cumulative usage updates. Events are dispatched on
 /// the JSON `type` field of each `data:` line, so `event:` framing lines and
 /// unknown events (`ping`, `content_block_delta`, …) are skipped naturally.
+///
+/// Assumes one `data:` line per SSE event. The SSE spec permits a multi-line
+/// `data:` field (values joined with `\n` form one event payload); the
+/// Anthropic API emits single-line `data:` only, so per-line JSON parsing is
+/// sufficient — revisit here if that ever changes.
 fn parse_sse_response(body: &[u8]) -> ParsedResponse {
     let text = String::from_utf8_lossy(body);
     let mut out = ParsedResponse::default();

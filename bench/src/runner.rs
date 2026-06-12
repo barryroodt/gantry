@@ -28,10 +28,10 @@ use anyhow::{Context, Result};
 use tokio::io::AsyncReadExt;
 use tokio::task::JoinHandle;
 
-use crate::grade::{self, GradeSpec, JudgeConfig, JudgeOutcome};
+use crate::grade::{self, JudgeConfig, JudgeOutcome};
 use crate::harness::{Harness, RunCtx};
 use crate::proxy::RecorderProxy;
-use crate::task::{GradingSpec, RepoCache, Task, TaskKind};
+use crate::task::{RepoCache, Task, TaskKind};
 use crate::types::{GradeResult, Ledger, RunOutcome, RunRecord, RunResult};
 
 /// `--max-tokens` budget handed to gantry. Deliberately far beyond any real
@@ -106,14 +106,15 @@ pub async fn run_suite(cfg: &RunnerConfig) -> Result<Vec<RunRecord>> {
     Ok(records)
 }
 
+/// A `(tasks × harnesses)` matrix selection, as consumed by [`run_suite`]
+/// via [`RunnerConfig`].
+pub type Selection = (Vec<Task>, Vec<Box<dyn Harness>>);
+
 /// `--smoke` selection: the first `explore` task in suite order × the gantry
 /// harness (× 1 rep, set by the caller). Validates plumbing as cheaply as
 /// possible; honors `GANTRY_BENCH_UPSTREAM` because the upstream is resolved
 /// by the caller exactly as for a full run.
-pub fn smoke_selection(
-    tasks: Vec<Task>,
-    harnesses: Vec<Box<dyn Harness>>,
-) -> Result<(Vec<Task>, Vec<Box<dyn Harness>>)> {
+pub fn smoke_selection(tasks: Vec<Task>, harnesses: Vec<Box<dyn Harness>>) -> Result<Selection> {
     let task = tasks
         .into_iter()
         .find(|t| t.manifest.kind == TaskKind::Explore)
@@ -128,7 +129,9 @@ pub fn smoke_selection(
 /// Default results directory: `bench/results/<UTC yyyymmdd-HHMMSS>`.
 pub fn default_out_dir() -> PathBuf {
     let ts = chrono::Utc::now().format("%Y%m%d-%H%M%S").to_string();
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("results").join(ts)
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("results")
+        .join(ts)
 }
 
 /// Git SHA of this gantry checkout, `"unknown"` when undeterminable.
@@ -253,29 +256,17 @@ fn infra_crash(
     }
 }
 
-/// Grade one completed run: convert the manifest's grading table, resolve the
-/// judge outcome (never fatally), and fold both into a [`GradeResult`].
+/// Grade one completed run: resolve the judge outcome (never fatally) and
+/// fold it together with the manifest's pre-validated grading spec into a
+/// [`GradeResult`].
 async fn grade_completed(
     cfg: &RunnerConfig,
     task: &Task,
     run: &RunResult,
     workspace: &Path,
 ) -> GradeResult {
-    let spec = to_grade_spec(&task.manifest.grading);
     let judge = judge_outcome(cfg, task, run.answer.as_deref()).await;
-    grade::grade_run(&spec, run, workspace, judge)
-}
-
-/// Manifest grading table → grade-module spec (the two differ only in
-/// `Option<Vec>` vs `Vec` for the diff checks).
-fn to_grade_spec(g: &GradingSpec) -> GradeSpec {
-    GradeSpec {
-        answer_contains: g.answer_contains.clone(),
-        check_command: g.check_command.clone(),
-        diff_contains: g.diff_contains.clone().unwrap_or_default(),
-        diff_must_not_touch: g.diff_must_not_touch.clone().unwrap_or_default(),
-        judge_threshold: g.judge_threshold,
-    }
+    grade::grade_run(&task.manifest.grading, run, workspace, judge)
 }
 
 /// Resolve the judge outcome for one run. Judge problems surface as
@@ -292,19 +283,9 @@ async fn judge_outcome(cfg: &RunnerConfig, task: &Task, answer: Option<&str>) ->
         return JudgeOutcome::Failed("no answer extracted from harness stdout".into());
     };
     match grade::run_judge(judge, &task.prompt, rubric, answer).await {
-        Ok(verdict) => {
-            // Judge usage is bookkeeping only (invariant 6): GradeResult has
-            // no usage field in the canonical schema, so report it here —
-            // never into the Ledger.
-            eprintln!(
-                "gantry-bench: judge ({}) usage for {}: {} in / {} out tokens",
-                verdict.usage.model,
-                task.manifest.id,
-                verdict.usage.input_tokens,
-                verdict.usage.output_tokens,
-            );
-            JudgeOutcome::Scored(verdict)
-        }
+        // Judge usage rides on the verdict into GradeResult.judge_usage —
+        // persisted bookkeeping, never merged into the Ledger (invariant 6).
+        Ok(verdict) => JudgeOutcome::Scored(verdict),
         Err(e) => JudgeOutcome::Failed(format!("{e:#}")),
     }
 }

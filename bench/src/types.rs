@@ -46,7 +46,11 @@ pub struct LedgerEntry {
     pub response_bytes: u64,
     /// Length of the `messages` array in the request.
     pub message_count: u32,
-    /// Serialized size of the `tools` field in the request (0 when absent).
+    /// Size of the request's `tools` field re-serialized to compact JSON
+    /// (0 when absent). A *normalized* measure of tool-schema payload —
+    /// comparable across harnesses because each harness's real whitespace and
+    /// key order are canonicalized away — NOT an on-wire byte count;
+    /// `request_bytes` is the as-received wire size.
     pub tools_bytes: u64,
 }
 
@@ -100,6 +104,16 @@ pub struct CheckResult {
     pub detail: Option<String>,
 }
 
+/// Token usage of one blinded-judge call — bookkeeping only (invariant 6):
+/// persisted and reported separately, never merged into a [`Ledger`] or any
+/// efficiency metric.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct JudgeUsage {
+    pub model: String,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+}
+
 /// Grading verdict for one run. `success` = all programmatic checks pass AND
 /// judge score ≥ the task threshold (invariant 7).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -107,6 +121,12 @@ pub struct GradeResult {
     pub checks: Vec<CheckResult>,
     pub judge_score: Option<f32>,
     pub judge_rationale: Option<String>,
+    /// Usage of the judge call that produced `judge_score`; `None` when the
+    /// task had no rubric or the judge failed. Canonical-schema amendment
+    /// (review hb-review-1 m1): defaults on deserialize so pre-amendment
+    /// records still parse.
+    #[serde(default)]
+    pub judge_usage: Option<JudgeUsage>,
     pub success: bool,
 }
 
@@ -170,6 +190,11 @@ mod tests {
                 }],
                 judge_score: Some(8.5),
                 judge_rationale: Some("correct root cause".into()),
+                judge_usage: Some(JudgeUsage {
+                    model: "claude-judge-20260101".into(),
+                    input_tokens: 880,
+                    output_tokens: 61,
+                }),
                 success: true,
             }),
         }

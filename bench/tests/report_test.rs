@@ -8,7 +8,7 @@ use std::path::Path;
 use gantry_bench::price::{cost_usd, price_for};
 use gantry_bench::report::{assemble_results, render_report, results_json, write_artifacts};
 use gantry_bench::types::{
-    GradeResult, Ledger, LedgerEntry, RunOutcome, RunRecord, RunResult, Usage,
+    GradeResult, JudgeUsage, Ledger, LedgerEntry, RunOutcome, RunRecord, RunResult, Usage,
 };
 
 const SONNET: &str = "claude-sonnet-4-5-20250929";
@@ -73,6 +73,11 @@ fn record(
             checks: vec![],
             judge_score: Some(7.0),
             judge_rationale: None,
+            judge_usage: Some(JudgeUsage {
+                model: SONNET.to_string(),
+                input_tokens: 800,
+                output_tokens: 50,
+            }),
             success,
         }),
     }
@@ -86,7 +91,11 @@ fn record(
 fn cost_arithmetic_on_known_ledger() {
     let ledger = Ledger {
         entries: vec![
-            entry(SONNET, Some(usage(1_000_000, 2_000_000, 10_000_000, 200_000)), &[]),
+            entry(
+                SONNET,
+                Some(usage(1_000_000, 2_000_000, 10_000_000, 200_000)),
+                &[],
+            ),
             entry(SONNET, Some(usage(500_000, 0, 0, 100_000)), &[]),
             // Error response: no usage, unknown model — carries no billable
             // tokens, must not poison the run cost.
@@ -112,7 +121,11 @@ fn unknown_model_with_usage_makes_cost_none() {
         untracked_requests: 0,
         untracked_bytes: 0,
     };
-    assert_eq!(cost_usd(&ledger), None, "partial pricing must never be reported");
+    assert_eq!(
+        cost_usd(&ledger),
+        None,
+        "partial pricing must never be reported"
+    );
 }
 
 #[test]
@@ -150,9 +163,18 @@ fn failures_excluded_from_medians_included_in_success_rate() {
         record("t", "gantry", 3, Some(false), 999_999, 600_000),
     ];
     let md = render_report(&records);
-    assert!(md.contains("| gantry | 2/3 (67%) |"), "success rate counts failures:\n{md}");
-    assert!(md.contains("| 1500 [1000–2000] |"), "median over successes only:\n{md}");
-    assert!(!md.contains("999999"), "failed-run tokens leaked into the report:\n{md}");
+    assert!(
+        md.contains("| gantry | 2/3 (67%) |"),
+        "success rate counts failures:\n{md}"
+    );
+    assert!(
+        md.contains("| 1500 [1000–2000] |"),
+        "median over successes only:\n{md}"
+    );
+    assert!(
+        !md.contains("999999"),
+        "failed-run tokens leaked into the report:\n{md}"
+    );
 }
 
 #[test]
@@ -181,9 +203,21 @@ fn assemble_results_reads_sorts_and_round_trips() {
     let a = record("b-task", "pi", 1, Some(true), 10, 1);
     let b = record("a-task", "claude-code", 2, Some(true), 20, 2);
     let c = record("a-task", "gantry", 1, Some(true), 30, 3);
-    fs::write(dir.path().join("z.json"), serde_json::to_string(&a).unwrap()).unwrap();
-    fs::write(dir.path().join("y.json"), serde_json::to_string(&b).unwrap()).unwrap();
-    fs::write(dir.path().join("x.json"), serde_json::to_string(&c).unwrap()).unwrap();
+    fs::write(
+        dir.path().join("z.json"),
+        serde_json::to_string(&a).unwrap(),
+    )
+    .unwrap();
+    fs::write(
+        dir.path().join("y.json"),
+        serde_json::to_string(&b).unwrap(),
+    )
+    .unwrap();
+    fs::write(
+        dir.path().join("x.json"),
+        serde_json::to_string(&c).unwrap(),
+    )
+    .unwrap();
     fs::write(dir.path().join("notes.txt"), "not a record").unwrap();
 
     let records = assemble_results(dir.path()).unwrap();
@@ -194,7 +228,11 @@ fn assemble_results_reads_sorts_and_round_trips() {
     // Task alphabetical, then canonical harness order (gantry < claude-code), then rep.
     assert_eq!(
         keys,
-        vec![("a-task", "gantry", 1), ("a-task", "claude-code", 2), ("b-task", "pi", 1)]
+        vec![
+            ("a-task", "gantry", 1),
+            ("a-task", "claude-code", 2),
+            ("b-task", "pi", 1)
+        ]
     );
 
     let parsed: Vec<RunRecord> = serde_json::from_str(&results_json(&records).unwrap()).unwrap();

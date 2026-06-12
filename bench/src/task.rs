@@ -20,10 +20,10 @@ use anyhow::{bail, Context, Result};
 use serde::Deserialize;
 use tempfile::TempDir;
 
+use crate::grade::GradeSpec;
+
 /// Default per-task timeout (10 minutes), per the task.toml contract.
 pub const DEFAULT_TIMEOUT_MS: u64 = 600_000;
-/// Default judge score threshold for run success, per the task.toml contract.
-pub const DEFAULT_JUDGE_THRESHOLD: f32 = 6.0;
 
 /// What kind of work the task demands. `mutate` switches harness adapters
 /// into their file-mutation mode (plan Task 4).
@@ -55,44 +55,6 @@ pub struct WorkspaceSpec {
     pub sha: String,
 }
 
-/// `[grading]` table: programmatic checks + judge threshold (consumed by
-/// `grade.rs`, plan Task 5).
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct GradingSpec {
-    /// Minimum judge score (0–10) for run success. Default 6.0.
-    #[serde(default = "default_judge_threshold")]
-    pub judge_threshold: f32,
-    /// Regexes that must each match the extracted answer.
-    #[serde(default)]
-    pub answer_contains: Vec<String>,
-    /// Command run in the post-run workspace; exit 0 = pass.
-    #[serde(default)]
-    pub check_command: Option<String>,
-    /// Substrings that must appear in the workspace diff.
-    #[serde(default)]
-    pub diff_contains: Option<Vec<String>>,
-    /// Path globs that must not appear among changed paths.
-    #[serde(default)]
-    pub diff_must_not_touch: Option<Vec<String>>,
-}
-
-impl Default for GradingSpec {
-    fn default() -> Self {
-        Self {
-            judge_threshold: DEFAULT_JUDGE_THRESHOLD,
-            answer_contains: Vec::new(),
-            check_command: None,
-            diff_contains: None,
-            diff_must_not_touch: None,
-        }
-    }
-}
-
-fn default_judge_threshold() -> f32 {
-    DEFAULT_JUDGE_THRESHOLD
-}
-
 fn default_timeout_ms() -> u64 {
     DEFAULT_TIMEOUT_MS
 }
@@ -108,15 +70,16 @@ pub struct TaskManifest {
     #[serde(default = "default_timeout_ms")]
     pub timeout_ms: u64,
     pub workspace: WorkspaceSpec,
+    /// `[grading]` table — the canonical [`GradeSpec`] (one grading-spec type
+    /// crate-wide, invariant 3); validated fail-fast in [`Self::parse`].
     #[serde(default)]
-    pub grading: GradingSpec,
+    pub grading: GradeSpec,
 }
 
 impl TaskManifest {
     /// Parse and validate a `task.toml` document.
     pub fn parse(toml_str: &str) -> Result<Self> {
-        let manifest: TaskManifest =
-            toml::from_str(toml_str).context("parsing task.toml")?;
+        let manifest: TaskManifest = toml::from_str(toml_str).context("parsing task.toml")?;
         manifest.validate()?;
         Ok(manifest)
     }
@@ -135,32 +98,9 @@ impl TaskManifest {
         }
         let sha = &self.workspace.sha;
         if sha.len() != 40 || !sha.bytes().all(|b| b.is_ascii_hexdigit()) {
-            bail!(
-                "task.toml: `workspace.sha` must be a full 40-char hex commit SHA, got {sha:?}"
-            );
+            bail!("task.toml: `workspace.sha` must be a full 40-char hex commit SHA, got {sha:?}");
         }
-        let threshold = self.grading.judge_threshold;
-        if !(0.0..=10.0).contains(&threshold) {
-            bail!(
-                "task.toml: `grading.judge_threshold` must be within 0..=10, got {threshold}"
-            );
-        }
-        for pattern in &self.grading.answer_contains {
-            regex::Regex::new(pattern).with_context(|| {
-                format!(
-                    "task.toml: `grading.answer_contains` entry {pattern:?} is not a valid regex"
-                )
-            })?;
-        }
-        if let Some(globs) = &self.grading.diff_must_not_touch {
-            for glob in globs {
-                globset::Glob::new(glob).with_context(|| {
-                    format!(
-                        "task.toml: `grading.diff_must_not_touch` entry {glob:?} is not a valid glob"
-                    )
-                })?;
-            }
-        }
+        self.grading.validate()?;
         Ok(())
     }
 }
@@ -196,8 +136,8 @@ pub fn load_task(dir: &Path) -> Result<Task> {
     let manifest_path = dir.join("task.toml");
     let raw = fs::read_to_string(&manifest_path)
         .with_context(|| format!("reading {}", manifest_path.display()))?;
-    let manifest = TaskManifest::parse(&raw)
-        .with_context(|| format!("in {}", manifest_path.display()))?;
+    let manifest =
+        TaskManifest::parse(&raw).with_context(|| format!("in {}", manifest_path.display()))?;
 
     let dir_name = dir.file_name().and_then(|n| n.to_str()).unwrap_or_default();
     if manifest.id != dir_name {
@@ -226,7 +166,12 @@ pub fn load_task(dir: &Path) -> Result<Task> {
         None
     };
 
-    Ok(Task { manifest, dir: dir.to_path_buf(), prompt, rubric })
+    Ok(Task {
+        manifest,
+        dir: dir.to_path_buf(),
+        prompt,
+        rubric,
+    })
 }
 
 /// Load every task under `tasks_dir` (one subdirectory per task), sorted by
@@ -272,7 +217,11 @@ impl RepoCache {
 
     /// The shared on-disk cache, `bench/.cache/repos` (gitignored).
     pub fn shared() -> Self {
-        Self::new(Path::new(env!("CARGO_MANIFEST_DIR")).join(".cache").join("repos"))
+        Self::new(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join(".cache")
+                .join("repos"),
+        )
     }
 
     /// Materialize a fresh, independent workspace at the pinned SHA.
@@ -282,15 +231,23 @@ impl RepoCache {
     /// against that baseline.
     pub fn materialize(&self, spec: &WorkspaceSpec) -> Result<Workspace> {
         let cache = self.ensure_repo(&spec.repo_url, &spec.sha)?;
-        let tmp = TempDir::with_prefix("gantry-bench-ws-")
-            .context("creating workspace tempdir")?;
+        let tmp = TempDir::with_prefix("gantry-bench-ws-").context("creating workspace tempdir")?;
         let root = tmp.path();
         let root_str = path_str(root)?;
 
         // Export the pinned tree: local clone (hardlinked objects, cheap),
         // detach at the SHA, then strip and rewrite history to one commit.
-        git(&["clone", "--quiet", "--no-checkout", path_str(&cache)?, root_str], None)
-            .with_context(|| format!("cloning cache for {}", spec.repo_url))?;
+        git(
+            &[
+                "clone",
+                "--quiet",
+                "--no-checkout",
+                path_str(&cache)?,
+                root_str,
+            ],
+            None,
+        )
+        .with_context(|| format!("cloning cache for {}", spec.repo_url))?;
         git(&["checkout", "--quiet", "--detach", &spec.sha], Some(root))
             .with_context(|| format!("checking out {}", spec.sha))?;
         fs::remove_dir_all(root.join(".git")).context("stripping upstream history")?;
@@ -330,17 +287,19 @@ impl RepoCache {
                 .tempdir_in(&self.root)
                 .context("creating clone staging dir")?;
             let staged = staging.path().join("repo.git");
-            git(&["clone", "--quiet", "--bare", url, path_str(&staged)?], None)
-                .with_context(|| format!("cloning {url}"))?;
+            git(
+                &["clone", "--quiet", "--bare", url, path_str(&staged)?],
+                None,
+            )
+            .with_context(|| format!("cloning {url}"))?;
             match fs::rename(&staged, &dir) {
                 Ok(()) => {}
                 // Lost a race with a concurrent clone of the same URL; the
                 // winner's cache is equivalent.
                 Err(_) if dir.exists() => {}
                 Err(e) => {
-                    return Err(e).with_context(|| {
-                        format!("moving clone of {url} into {}", dir.display())
-                    })
+                    return Err(e)
+                        .with_context(|| format!("moving clone of {url} into {}", dir.display()))
                 }
             }
         }
@@ -395,7 +354,13 @@ fn cache_dir_name(url: &str) -> String {
         .unwrap_or("repo");
     let mut slug: String = tail
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.') { c } else { '-' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.') {
+                c
+            } else {
+                '-'
+            }
+        })
         .take(40)
         .collect();
     if slug.is_empty() {
@@ -416,10 +381,13 @@ fn fnv1a64(s: &str) -> u64 {
 }
 
 fn has_commit(bare_dir: &Path, sha: &str) -> bool {
-    git_cmd(&["cat-file", "-e", &format!("{sha}^{{commit}}")], Some(bare_dir))
-        .output()
-        .map(|out| out.status.success())
-        .unwrap_or(false)
+    git_cmd(
+        &["cat-file", "-e", &format!("{sha}^{{commit}}")],
+        Some(bare_dir),
+    )
+    .output()
+    .map(|out| out.status.success())
+    .unwrap_or(false)
 }
 
 /// Hermetic git invocation: user/system config, hooks, and credential

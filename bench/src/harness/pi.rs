@@ -19,12 +19,13 @@
 //!   → kept inside the hermetic tempdir so runs leave no shared state.
 //! - `ANTHROPIC_BASE_URL` (*) — API base override → recording proxy.
 //! - `ANTHROPIC_OAUTH_TOKEN` (*) — "takes precedence over API key" per
-//!   `--help`, so it MUST be scrubbed (fairness §5: OAuth would bypass the
-//!   keyed proxy auth path).
+//!   `--help`, so it must never reach the harness (fairness §5: OAuth would
+//!   bypass the keyed proxy auth path). [`hermetic_command`]'s cleared env
+//!   guarantees that without name-by-name scrubbing.
 
 use std::process::Command;
 
-use super::{read_prompt, version_from, Harness, RunCtx};
+use super::{hermetic_command, read_prompt, version_from, Harness, RunCtx};
 
 /// Pi adapter (`omp` resolved from `PATH`).
 #[derive(Debug, Clone, Copy, Default)]
@@ -46,8 +47,10 @@ impl Harness for Pi {
             "workspace {} contains .env — it would leak into omp's environment",
             ctx.workspace.display()
         );
-        let mut cmd = Command::new("omp");
-        cmd.current_dir(&ctx.workspace);
+        // Hermetic env (fairness §2/§5): cleared + allowlist, so inherited
+        // `ANTHROPIC_OAUTH_TOKEN` / `PI_*` / proxy vars never reach omp; only
+        // the vars set below get through.
+        let mut cmd = hermetic_command("omp", ctx);
         cmd.arg("-p");
         cmd.arg("--model").arg(&ctx.model);
         cmd.arg("--no-title");
@@ -60,15 +63,18 @@ impl Harness for Pi {
         cmd.env("PI_CONFIG_DIR", &ctx.config_dir);
         cmd.env("PI_CODING_AGENT_DIR", ctx.config_dir.join("agent"));
         cmd.env("PI_NO_TITLE", "1");
-        // Fairness §5: OAuth takes precedence over the API key and would
-        // bypass the proxy's keyed auth path.
-        cmd.env_remove("ANTHROPIC_OAUTH_TOKEN");
         cmd
     }
 
     fn extract_answer(&self, stdout: &str) -> Option<String> {
-        // `omp -p` (default text output mode) prints the final assistant text
-        // to stdout; the whole trimmed stream is the answer.
+        // `omp -p` (default text output mode) writes ONLY the final assistant
+        // message to stdout — symmetric with the other adapters' structured
+        // final-message extraction. Verified against the installed bundle
+        // (@oh-my-pi/pi-coding-agent v15.11.0, dist/cli.js `runPrintMode`,
+        // mode "text"): it prints the text content blocks of the LAST
+        // `messages` entry only when `role == "assistant"`; interim turns are
+        // never echoed and errors/warnings go to stderr. The whole trimmed
+        // stream therefore IS the final message (possibly multi-line).
         let text = stdout.trim();
         (!text.is_empty()).then(|| text.to_string())
     }

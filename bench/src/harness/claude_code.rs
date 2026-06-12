@@ -23,7 +23,7 @@
 
 use std::process::Command;
 
-use super::{read_prompt, version_from, Harness, RunCtx};
+use super::{hermetic_command, read_prompt, version_from, Harness, RunCtx};
 
 /// Claude Code adapter (`claude` resolved from `PATH`).
 #[derive(Debug, Clone, Copy, Default)]
@@ -36,8 +36,12 @@ impl Harness for ClaudeCode {
 
     fn command(&self, ctx: &RunCtx) -> Command {
         let prompt = read_prompt(ctx);
-        let mut cmd = Command::new("claude");
-        cmd.current_dir(&ctx.workspace);
+        // Hermetic env (fairness §2/§5): cleared + allowlist, so inherited
+        // auth/config vars (`ANTHROPIC_AUTH_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN`,
+        // `ANTHROPIC_MODEL`, other `CLAUDE_CODE_*`, proxies, …) never reach
+        // the harness. Token auth would bypass the base-URL override (and the
+        // proxy with it); only the vars set below get through.
+        let mut cmd = hermetic_command("claude", ctx);
         cmd.args(["-p", "--output-format", "stream-json", "--verbose"]);
         cmd.arg("--model").arg(&ctx.model);
         if ctx.mutate {
@@ -50,10 +54,6 @@ impl Harness for ClaudeCode {
         cmd.env("ANTHROPIC_API_KEY", &ctx.api_key);
         cmd.env("CLAUDE_CONFIG_DIR", &ctx.config_dir);
         cmd.env("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "1");
-        // Fairness §5: API-key auth only. Token-based auth paths would bypass
-        // the base-URL override (and the proxy with it).
-        cmd.env_remove("ANTHROPIC_AUTH_TOKEN");
-        cmd.env_remove("CLAUDE_CODE_OAUTH_TOKEN");
         cmd
     }
 
@@ -68,10 +68,7 @@ impl Harness for ClaudeCode {
                 continue;
             };
             if v.get("type").and_then(|t| t.as_str()) == Some("result") {
-                answer = v
-                    .get("result")
-                    .and_then(|r| r.as_str())
-                    .map(str::to_string);
+                answer = v.get("result").and_then(|r| r.as_str()).map(str::to_string);
             }
         }
         answer

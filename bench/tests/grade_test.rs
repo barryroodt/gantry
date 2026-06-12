@@ -7,9 +7,9 @@ use std::path::Path;
 use gantry_bench::grade::{
     build_judge_prompt, build_judge_request_body, changed_paths, compute_grade, grade_run,
     parse_judge_response, parse_verdict, run_checks, GradeSpec, JudgeConfig, JudgeOutcome,
-    JudgeUsage, JudgeVerdict, ANTHROPIC_API_URL, DEFAULT_JUDGE_THRESHOLD, JUDGE_SYSTEM_PROMPT,
+    JudgeVerdict, ANTHROPIC_API_URL, DEFAULT_JUDGE_THRESHOLD, JUDGE_SYSTEM_PROMPT,
 };
-use gantry_bench::types::{CheckResult, Ledger, RunOutcome, RunResult};
+use gantry_bench::types::{CheckResult, JudgeUsage, Ledger, RunOutcome, RunResult};
 use regex::Regex;
 use serde_json::json;
 
@@ -71,11 +71,19 @@ fn failing_check() -> CheckResult {
     }
 }
 
+fn usage(input: u64, output: u64) -> JudgeUsage {
+    JudgeUsage {
+        model: "judge-model".into(),
+        input_tokens: input,
+        output_tokens: output,
+    }
+}
+
 fn verdict(score: f32) -> JudgeVerdict {
     JudgeVerdict {
         score,
         rationale: "because".into(),
-        usage: JudgeUsage::default(),
+        usage: usage(100, 10),
     }
 }
 
@@ -103,7 +111,11 @@ fn answer_contains_fails_on_unmatched_pattern() {
     let checks = run_checks(&s, &run, Path::new("."));
     assert!(!checks[0].pass);
     assert!(
-        checks[0].detail.as_deref().unwrap().contains("nonexistent_symbol"),
+        checks[0]
+            .detail
+            .as_deref()
+            .unwrap()
+            .contains("nonexistent_symbol"),
         "{checks:?}"
     );
 }
@@ -121,17 +133,15 @@ fn answer_contains_fails_when_no_answer_extracted() {
     );
 }
 
+// Invalid patterns are a bench bug, not a gradable outcome: GradeSpec is
+// validated fail-fast at manifest load, and the check path trusts that.
 #[test]
-fn answer_contains_invalid_regex_fails_with_detail() {
+#[should_panic(expected = "unvalidated answer_contains regex")]
+fn answer_contains_unvalidated_regex_panics() {
     let mut s = spec();
     s.answer_contains = vec!["(".into()];
     let run = run_result(Some("text"), "");
-    let checks = run_checks(&s, &run, Path::new("."));
-    assert!(!checks[0].pass);
-    assert!(
-        checks[0].detail.as_deref().unwrap().contains("invalid regex"),
-        "{checks:?}"
-    );
+    run_checks(&s, &run, Path::new("."));
 }
 
 // --------------------------------------------------------------------------
@@ -178,7 +188,11 @@ fn diff_contains_substring_pass_and_fail() {
     assert!(checks[0].pass, "{checks:?}");
     assert!(!checks[1].pass, "{checks:?}");
     assert!(
-        checks[1].detail.as_deref().unwrap().contains("no_such_line"),
+        checks[1]
+            .detail
+            .as_deref()
+            .unwrap()
+            .contains("no_such_line"),
         "{checks:?}"
     );
 }
@@ -210,7 +224,11 @@ fn diff_must_not_touch_fails_when_glob_matches_changed_path() {
     assert_eq!(checks[0].name, "diff_must_not_touch[0]");
     assert!(!checks[0].pass);
     assert!(
-        checks[0].detail.as_deref().unwrap().contains("tests/foo_test.rs"),
+        checks[0]
+            .detail
+            .as_deref()
+            .unwrap()
+            .contains("tests/foo_test.rs"),
         "{checks:?}"
     );
 }
@@ -252,17 +270,15 @@ index 1111111..2222222 100644
     assert!(checks[0].pass, "*.rs must not match tests/foo_test.rs");
 }
 
+// See answer_contains_unvalidated_regex_panics: grade trusts load-time
+// validation (GradeSpec::validate) instead of re-checking defensively.
 #[test]
-fn diff_must_not_touch_invalid_glob_fails_with_detail() {
+#[should_panic(expected = "unvalidated diff_must_not_touch glob")]
+fn diff_must_not_touch_unvalidated_glob_panics() {
     let mut s = spec();
     s.diff_must_not_touch = vec!["[".into()];
     let run = run_result(None, SAMPLE_DIFF);
-    let checks = run_checks(&s, &run, Path::new("."));
-    assert!(!checks[0].pass);
-    assert!(
-        checks[0].detail.as_deref().unwrap().contains("invalid glob"),
-        "{checks:?}"
-    );
+    run_checks(&s, &run, Path::new("."));
 }
 
 // --------------------------------------------------------------------------
@@ -271,20 +287,38 @@ fn diff_must_not_touch_invalid_glob_fails_with_detail() {
 
 #[test]
 fn success_requires_checks_pass_and_judge_at_or_above_threshold() {
-    let g = compute_grade(vec![passing_check()], JudgeOutcome::Scored(verdict(7.0)), 6.0);
+    let g = compute_grade(
+        vec![passing_check()],
+        JudgeOutcome::Scored(verdict(7.0)),
+        6.0,
+    );
     assert!(g.success);
     assert_eq!(g.judge_score, Some(7.0));
     assert_eq!(g.judge_rationale.as_deref(), Some("because"));
+    // The verdict's usage is persisted as bookkeeping (invariant 6).
+    assert_eq!(g.judge_usage, Some(usage(100, 10)));
 
     // Exactly at threshold counts (>=).
-    let g = compute_grade(vec![passing_check()], JudgeOutcome::Scored(verdict(6.0)), 6.0);
+    let g = compute_grade(
+        vec![passing_check()],
+        JudgeOutcome::Scored(verdict(6.0)),
+        6.0,
+    );
     assert!(g.success);
 
-    let g = compute_grade(vec![passing_check()], JudgeOutcome::Scored(verdict(5.9)), 6.0);
+    let g = compute_grade(
+        vec![passing_check()],
+        JudgeOutcome::Scored(verdict(5.9)),
+        6.0,
+    );
     assert!(!g.success);
 
     // High judge score never rescues a failing programmatic check.
-    let g = compute_grade(vec![failing_check()], JudgeOutcome::Scored(verdict(10.0)), 6.0);
+    let g = compute_grade(
+        vec![failing_check()],
+        JudgeOutcome::Scored(verdict(10.0)),
+        6.0,
+    );
     assert!(!g.success);
 }
 
@@ -294,6 +328,7 @@ fn no_rubric_means_checks_alone_decide() {
     assert!(g.success);
     assert_eq!(g.judge_score, None);
     assert_eq!(g.judge_rationale, None);
+    assert_eq!(g.judge_usage, None);
 
     let g = compute_grade(vec![failing_check()], JudgeOutcome::NotRequired, 6.0);
     assert!(!g.success);
@@ -316,11 +351,15 @@ fn judge_failure_with_required_rubric_fails_and_is_flagged_via_detail() {
     assert!(!g.success);
     assert_eq!(g.judge_score, None);
     assert_eq!(g.judge_rationale, None);
+    assert_eq!(g.judge_usage, None, "failed judge call has no usable usage");
     let flag = g.checks.last().unwrap();
     assert_eq!(flag.name, "judge");
     assert!(!flag.pass);
     assert!(
-        flag.detail.as_deref().unwrap().contains("connection refused"),
+        flag.detail
+            .as_deref()
+            .unwrap()
+            .contains("connection refused"),
         "{flag:?}"
     );
 }

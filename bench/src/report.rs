@@ -28,15 +28,25 @@ pub fn assemble_results(raw_dir: &Path) -> Result<Vec<RunRecord>> {
         if path.extension().is_none_or(|ext| ext != "json") {
             continue;
         }
-        let bytes = fs::read(&path)
-            .with_context(|| format!("reading run record {}", path.display()))?;
+        let bytes =
+            fs::read(&path).with_context(|| format!("reading run record {}", path.display()))?;
         let record: RunRecord = serde_json::from_slice(&bytes)
             .with_context(|| format!("parsing run record {}", path.display()))?;
         records.push(record);
     }
     records.sort_by(|a, b| {
-        (&a.run.task_id, harness_rank(&a.run.harness), &a.run.harness, a.run.rep)
-            .cmp(&(&b.run.task_id, harness_rank(&b.run.harness), &b.run.harness, b.run.rep))
+        (
+            &a.run.task_id,
+            harness_rank(&a.run.harness),
+            &a.run.harness,
+            a.run.rep,
+        )
+            .cmp(&(
+                &b.run.task_id,
+                harness_rank(&b.run.harness),
+                &b.run.harness,
+                b.run.rep,
+            ))
     });
     Ok(records)
 }
@@ -139,9 +149,16 @@ fn stats(mut values: Vec<f64>) -> Option<Stats> {
     }
     values.sort_by(|a, b| a.partial_cmp(b).expect("metric values are finite"));
     let n = values.len();
-    let median =
-        if n % 2 == 1 { values[n / 2] } else { (values[n / 2 - 1] + values[n / 2]) / 2.0 };
-    Some(Stats { median, min: values[0], max: values[n - 1] })
+    let median = if n % 2 == 1 {
+        values[n / 2]
+    } else {
+        (values[n / 2 - 1] + values[n / 2]) / 2.0
+    };
+    Some(Stats {
+        median,
+        min: values[0],
+        max: values[n - 1],
+    })
 }
 
 /// Cost aggregates separately because any unpriceable run (unknown model)
@@ -273,7 +290,10 @@ pub fn render_report(records: &[RunRecord]) -> String {
     let mut untracked: BTreeMap<&str, (u32, u64)> = BTreeMap::new();
     for r in records {
         headline.entry(&r.run.harness).or_default().add(r);
-        per_task.entry((&r.run.task_id, &r.run.harness)).or_default().add(r);
+        per_task
+            .entry((&r.run.task_id, &r.run.harness))
+            .or_default()
+            .add(r);
         let (req, bytes) = untracked.entry(&r.run.harness).or_default();
         *req += r.run.ledger.untracked_requests;
         *bytes += r.run.ledger.untracked_bytes;
@@ -329,11 +349,19 @@ pub fn render_report(records: &[RunRecord]) -> String {
         .iter()
         .filter(|r| r.grade.as_ref().is_some_and(|g| g.judge_score.is_some()))
         .count();
+    // Judge spend comes from the persisted GradeResult.judge_usage field —
+    // bookkeeping only, never an efficiency metric (invariant 6).
+    let (judge_in, judge_out) = records
+        .iter()
+        .filter_map(|r| r.grade.as_ref().and_then(|g| g.judge_usage.as_ref()))
+        .fold((0u64, 0u64), |(i, o), u| {
+            (i + u.input_tokens, o + u.output_tokens)
+        });
     let _ = writeln!(
         out,
-        "- Judge bookkeeping: {scored} of {graded} graded runs carry a judge score; \
-         judge calls bypass the recording proxy and are excluded from every metric \
-         above."
+        "- Judge bookkeeping: {scored} of {graded} graded runs carry a judge score \
+         ({judge_in} in / {judge_out} out judge tokens); judge calls bypass the \
+         recording proxy and are excluded from every metric above."
     );
 
     out.push_str("\n---\n\n");

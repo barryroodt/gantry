@@ -10,7 +10,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use super::{version_from, Harness, RunCtx};
+use super::{hermetic_command, version_from, Harness, RunCtx};
 
 /// Tools granted on `mutate` tasks.
 ///
@@ -46,9 +46,7 @@ impl Gantry {
     /// (tests / pinned-binary runs), else the workspace `target/<profile>/`
     /// sibling of the running `gantry-bench` executable.
     pub fn new() -> Self {
-        Self {
-            bin: resolve_bin(),
-        }
+        Self { bin: resolve_bin() }
     }
 
     /// Use an explicit binary path (test hook; also useful for benchmarking a
@@ -86,8 +84,9 @@ impl Harness for Gantry {
     }
 
     fn command(&self, ctx: &RunCtx) -> Command {
-        let mut cmd = Command::new(&self.bin);
-        cmd.current_dir(&ctx.workspace);
+        // Hermetic env (fairness §2/§5): cleared + allowlist; only the two
+        // vars below reach gantry beyond the shared allowlist.
+        let mut cmd = hermetic_command(&self.bin, ctx);
         cmd.args(["--mode", "single"]);
         // gantry takes a provider/model slug; the bench is Anthropic-only
         // (the proxy speaks the Anthropic Messages API).

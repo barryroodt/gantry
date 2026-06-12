@@ -77,7 +77,9 @@ async fn non_streaming_exchange_recorded_exactly() {
         "tools": [{"name": "get_weather", "input_schema": {"type": "object"}}],
     });
     let req_body = serde_json::to_vec(&req_json).unwrap();
-    let expected_tools_bytes = serde_json::to_vec(req_json.get("tools").unwrap()).unwrap().len() as u64;
+    let expected_tools_bytes = serde_json::to_vec(req_json.get("tools").unwrap())
+        .unwrap()
+        .len() as u64;
 
     let resp = reqwest::Client::new()
         .post(format!("{}/v1/messages", proxy.base_url()))
@@ -270,17 +272,20 @@ async fn non_messages_paths_counted_as_untracked() {
 
     let base_url = proxy.base_url();
     let ledger = proxy.shutdown().await;
-    assert!(ledger.entries.is_empty(), "untracked traffic is never parsed");
+    assert!(
+        ledger.entries.is_empty(),
+        "untracked traffic is never parsed"
+    );
     assert_eq!(ledger.untracked_requests, 2);
     // GET: 0 req + 11 resp; POST: 3 req + 2 resp.
     assert_eq!(ledger.untracked_bytes, 11 + 3 + 2);
 
     // Graceful shutdown released the listener: new connections are refused.
-    let err = client
-        .get(format!("{base_url}/v1/models"))
-        .send()
-        .await;
-    assert!(err.is_err(), "proxy no longer accepts connections after shutdown");
+    let err = client.get(format!("{base_url}/v1/models")).send().await;
+    assert!(
+        err.is_err(),
+        "proxy no longer accepts connections after shutdown"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

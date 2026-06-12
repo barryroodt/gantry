@@ -16,10 +16,10 @@ use std::process::Command;
 use anyhow::{anyhow, Context, Result};
 use globset::GlobBuilder;
 use regex::Regex;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::types::{CheckResult, GradeResult, RunResult};
+use crate::types::{CheckResult, GradeResult, JudgeUsage, RunResult};
 
 /// Default judge score threshold (spec §grade).
 pub const DEFAULT_JUDGE_THRESHOLD: f32 = 6.0;
@@ -33,9 +33,13 @@ const JUDGE_MAX_TOKENS: u32 = 1024;
 /// Max bytes of check-command output kept in a [`CheckResult::detail`].
 const COMMAND_DETAIL_TAIL: usize = 1024;
 
-/// Grading section of `task.toml` (plan §task.toml contract). The runner
-/// constructs this from the parsed task manifest.
+/// The one canonical grading-spec type: the `[grading]` table of `task.toml`
+/// (plan §task.toml contract), embedded directly in
+/// [`crate::task::TaskManifest`] and consumed as-is by the checks below.
+/// Validated fail-fast at manifest load ([`GradeSpec::validate`]); everything
+/// downstream trusts pre-validated input.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct GradeSpec {
     /// Regex patterns that must each match the extracted answer.
     #[serde(default)]
@@ -71,6 +75,40 @@ impl Default for GradeSpec {
     }
 }
 
+impl GradeSpec {
+    /// Fail-fast semantic validation, run once at manifest load; every error
+    /// names the offending field. The check functions below rely on this
+    /// having passed (they `expect` regex/glob compilation).
+    pub fn validate(&self) -> Result<()> {
+        let threshold = self.judge_threshold;
+        if !(0.0..=10.0).contains(&threshold) {
+            anyhow::bail!(
+                "task.toml: `grading.judge_threshold` must be within 0..=10, got {threshold}"
+            );
+        }
+        for pattern in &self.answer_contains {
+            Regex::new(pattern).with_context(|| {
+                format!(
+                    "task.toml: `grading.answer_contains` entry {pattern:?} is not a valid regex"
+                )
+            })?;
+        }
+        for glob in &self.diff_must_not_touch {
+            // Same builder configuration as `diff_must_not_touch_check`, so
+            // validity here means compilability there.
+            GlobBuilder::new(glob)
+                .literal_separator(true)
+                .build()
+                .with_context(|| {
+                    format!(
+                    "task.toml: `grading.diff_must_not_touch` entry {glob:?} is not a valid glob"
+                )
+                })?;
+        }
+        Ok(())
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Programmatic checks
 // ---------------------------------------------------------------------------
@@ -99,16 +137,10 @@ pub fn run_checks(spec: &GradeSpec, run: &RunResult, workspace: &Path) -> Vec<Ch
 
 fn answer_contains_check(i: usize, pattern: &str, answer: Option<&str>) -> CheckResult {
     let name = format!("answer_contains[{i}]");
-    let re = match Regex::new(pattern) {
-        Ok(re) => re,
-        Err(e) => {
-            return CheckResult {
-                name,
-                pass: false,
-                detail: Some(format!("invalid regex {pattern:?}: {e}")),
-            }
-        }
-    };
+    // Pre-validated at manifest load (GradeSpec::validate); a failure here is
+    // a bench bug, not a gradable outcome.
+    let re = Regex::new(pattern)
+        .unwrap_or_else(|e| panic!("unvalidated answer_contains regex {pattern:?}: {e}"));
     let Some(text) = answer else {
         return CheckResult {
             name,
@@ -175,16 +207,12 @@ fn diff_contains_check(i: usize, needle: &str, diff: &str) -> CheckResult {
 
 fn diff_must_not_touch_check(i: usize, glob: &str, changed: &[String]) -> CheckResult {
     let name = format!("diff_must_not_touch[{i}]");
-    let matcher = match GlobBuilder::new(glob).literal_separator(true).build() {
-        Ok(g) => g.compile_matcher(),
-        Err(e) => {
-            return CheckResult {
-                name,
-                pass: false,
-                detail: Some(format!("invalid glob {glob:?}: {e}")),
-            }
-        }
-    };
+    // Pre-validated at manifest load (GradeSpec::validate).
+    let matcher = GlobBuilder::new(glob)
+        .literal_separator(true)
+        .build()
+        .unwrap_or_else(|e| panic!("unvalidated diff_must_not_touch glob {glob:?}: {e}"))
+        .compile_matcher();
     let touched: Vec<&str> = changed
         .iter()
         .filter(|p| matcher.is_match(p.as_str()))
@@ -195,7 +223,10 @@ fn diff_must_not_touch_check(i: usize, glob: &str, changed: &[String]) -> CheckR
         name,
         pass,
         detail: (!pass).then(|| {
-            format!("glob {glob:?} matches changed paths: {}", touched.join(", "))
+            format!(
+                "glob {glob:?} matches changed paths: {}",
+                touched.join(", ")
+            )
         }),
     }
 }
@@ -286,15 +317,6 @@ impl JudgeConfig {
     }
 }
 
-/// Judge token usage — bookkeeping only, reported separately from benchmark
-/// metrics and never merged into a [`crate::types::Ledger`] (invariant 6).
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct JudgeUsage {
-    pub model: String,
-    pub input_tokens: u64,
-    pub output_tokens: u64,
-}
-
 /// A successful judge verdict.
 #[derive(Debug, Clone, PartialEq)]
 pub struct JudgeVerdict {
@@ -358,7 +380,10 @@ pub async fn run_judge(
         .build()
         .context("building judge HTTP client")?;
     let resp = client
-        .post(format!("{}/v1/messages", cfg.base_url.trim_end_matches('/')))
+        .post(format!(
+            "{}/v1/messages",
+            cfg.base_url.trim_end_matches('/')
+        ))
         .header("x-api-key", &cfg.api_key)
         .header("anthropic-version", ANTHROPIC_VERSION)
         .json(&body)
@@ -366,10 +391,7 @@ pub async fn run_judge(
         .await
         .context("judge request failed")?;
     let status = resp.status();
-    let body: Value = resp
-        .json()
-        .await
-        .context("judge response was not JSON")?;
+    let body: Value = resp.json().await.context("judge response was not JSON")?;
     if !status.is_success() {
         return Err(anyhow!("judge API returned {status}: {body}"));
     }
@@ -431,7 +453,9 @@ pub fn parse_verdict(text: &str) -> Result<(f32, String)> {
 /// per invariant 7. A failed judge becomes a failing synthetic `judge` check
 /// and forces `success: false` (the rubric was required but could not be
 /// applied); a missing rubric ([`JudgeOutcome::NotRequired`]) leaves success
-/// to the programmatic checks alone.
+/// to the programmatic checks alone. A scored verdict's token usage is kept
+/// on [`GradeResult::judge_usage`] — persisted bookkeeping, never an
+/// efficiency metric (invariant 6).
 pub fn compute_grade(
     mut checks: Vec<CheckResult>,
     judge: JudgeOutcome,
@@ -439,12 +463,14 @@ pub fn compute_grade(
 ) -> GradeResult {
     let mut judge_score = None;
     let mut judge_rationale = None;
+    let mut judge_usage = None;
     // None = no judge gate; Some(pass) = judge gate result.
     let judge_gate = match judge {
         JudgeOutcome::NotRequired => None,
         JudgeOutcome::Scored(v) => {
             judge_score = Some(v.score);
             judge_rationale = Some(v.rationale);
+            judge_usage = Some(v.usage);
             Some(v.score >= threshold)
         }
         JudgeOutcome::Failed(reason) => {
@@ -462,6 +488,7 @@ pub fn compute_grade(
         checks,
         judge_score,
         judge_rationale,
+        judge_usage,
         success,
     }
 }
@@ -473,5 +500,9 @@ pub fn grade_run(
     workspace: &Path,
     judge: JudgeOutcome,
 ) -> GradeResult {
-    compute_grade(run_checks(spec, run, workspace), judge, spec.judge_threshold)
+    compute_grade(
+        run_checks(spec, run, workspace),
+        judge,
+        spec.judge_threshold,
+    )
 }
