@@ -381,8 +381,11 @@ async fn execute(mut cmd: std::process::Command, timeout: Duration) -> Exec {
     let outcome = if timed_out {
         RunOutcome::Timeout
     } else {
+        // Exit status is the harness's own verdict: a harness that ran to a
+        // failure conclusion (e.g. gantry exiting 1 after NDJSON error
+        // events) is a failed run regardless of what it printed.
         match &status {
-            Some(s) if s.success() || !stdout.trim().is_empty() => RunOutcome::Completed,
+            Some(s) if s.success() => RunOutcome::Completed,
             _ => RunOutcome::Crashed,
         }
     };

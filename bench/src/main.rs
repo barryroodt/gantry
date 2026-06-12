@@ -59,8 +59,12 @@ fn live_gate_open(live: Option<&str>, smoke: bool, upstream: Option<&str>) -> bo
 }
 
 /// Model id used for keyless mock-upstream smoke runs when `--model` is
-/// omitted (a mock upstream ignores it; live runs always require `--model`).
-const SMOKE_FALLBACK_MODEL: &str = "claude-bench-smoke";
+/// omitted (a mock upstream ignores the id; live runs always require
+/// `--model`). MUST be an id rig's Anthropic registry recognizes: gantry
+/// never sets a per-request `max_tokens`, so rig derives it from the model
+/// id and hard-fails on unknown ids ("`max_tokens` must be set for
+/// Anthropic") before any request reaches the proxy.
+const SMOKE_FALLBACK_MODEL: &str = "claude-haiku-4-5";
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -143,6 +147,10 @@ async fn main() -> anyhow::Result<()> {
         max_tokens: NON_BINDING_MAX_TOKENS,
     };
     let records = runner::run_suite(&cfg).await?;
+
+    // Assemble the run-level artifacts next to raw/ (canonical results layout:
+    // raw/*.json + results.json + report.md).
+    gantry_bench::report::write_artifacts(&out_dir, &records)?;
 
     let count = |o: RunOutcome| records.iter().filter(|r| r.run.outcome == o).count();
     println!(

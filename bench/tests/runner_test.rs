@@ -97,6 +97,8 @@ fn mem_task(
 /// has its own prompt), so one harness serves the whole matrix:
 /// - `BENCH-SLEEP`  → sleep far past the task timeout (kill-path case)
 /// - `BENCH-EXIT3`  → exit 3 with no stdout (crash-mapping case)
+/// - `BENCH-EXIT4`  → exit 4 AFTER printing an answer (a harness that ran but
+///   self-reports failure is still a failed run, never `completed`)
 /// - otherwise      → one POST through the proxy, a workspace write, a known
 ///   answer on stdout, and a marker on stderr
 const FAKE_SCRIPT: &str = r#"#!/bin/sh
@@ -106,6 +108,10 @@ if grep -q BENCH-SLEEP "$FAKE_PROMPT_FILE"; then
 fi
 if grep -q BENCH-EXIT3 "$FAKE_PROMPT_FILE"; then
     exit 3
+fi
+if grep -q BENCH-EXIT4 "$FAKE_PROMPT_FILE"; then
+    echo "ANSWER: the-known-answer"
+    exit 4
 fi
 curl -s -o /dev/null -X POST "$FAKE_PROXY_URL/v1/messages" \
     -H 'content-type: application/json' \
@@ -267,12 +273,21 @@ async fn matrix_end_to_end_with_fake_harness() {
             &sha,
             GradeSpec::default(),
         ),
+        mem_task(
+            "t5-exit4",
+            TaskKind::Explore,
+            "BENCH-EXIT4: print output, then exit non-zero.",
+            10_000,
+            &origin,
+            &sha,
+            GradeSpec::default(),
+        ),
     ];
 
     let fake = FakeHarness::create(root.path());
     let cfg = config(&root, mock.uri(), tasks, vec![Box::new(fake)]);
     let records = runner::run_suite(&cfg).await.expect("suite runs");
-    assert_eq!(records.len(), 4, "one record per matrix cell");
+    assert_eq!(records.len(), 5, "one record per matrix cell");
 
     let raw_dir = cfg.out_dir.join("raw");
 
@@ -362,6 +377,15 @@ async fn matrix_end_to_end_with_fake_harness() {
     assert_eq!(t4.run.exit_code, Some(3));
     assert!(t4.grade.is_none());
 
+    // --- t5: non-zero exit despite printed output → still crashed ----------
+    // A harness that runs to its own failure conclusion (gantry exits 1 and
+    // emits NDJSON error events) must never count as `completed`.
+    let t5 = &records[4];
+    assert_eq!(t5.run.task_id, "t5-exit4");
+    assert_eq!(t5.run.outcome, RunOutcome::Crashed);
+    assert_eq!(t5.run.exit_code, Some(4));
+    assert!(t5.grade.is_none());
+
     // --- incremental persistence -------------------------------------------
     // Every record was written to raw/ as its run finished: t1's file exists
     // (and matches) even though a later run timed out and another crashed.
@@ -370,6 +394,7 @@ async fn matrix_end_to_end_with_fake_harness() {
         ("t2-timeout-fake-r1.json", t2),
         ("t3-after-fake-r1.json", t3),
         ("t4-exit3-fake-r1.json", t4),
+        ("t5-exit4-fake-r1.json", t5),
     ] {
         assert_eq!(&read_record(&raw_dir, name), record, "{name} round-trips");
     }
