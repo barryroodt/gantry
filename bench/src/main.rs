@@ -8,6 +8,13 @@
 use clap::Parser;
 use std::path::PathBuf;
 
+use gantry_bench::grade::JudgeConfig;
+use gantry_bench::harness;
+use gantry_bench::proxy;
+use gantry_bench::runner::{self, RunnerConfig, NON_BINDING_MAX_TOKENS};
+use gantry_bench::task::{self, RepoCache};
+use gantry_bench::types::RunOutcome;
+
 #[derive(Parser, Debug)]
 #[command(
     name = "gantry-bench",
@@ -51,6 +58,10 @@ fn live_gate_open(live: Option<&str>, smoke: bool, upstream: Option<&str>) -> bo
     live == Some("1") || (smoke && upstream.is_some())
 }
 
+/// Model id used for keyless mock-upstream smoke runs when `--model` is
+/// omitted (a mock upstream ignores it; live runs always require `--model`).
+const SMOKE_FALLBACK_MODEL: &str = "claude-bench-smoke";
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
@@ -65,14 +76,84 @@ async fn main() -> anyhow::Result<()> {
         );
         return Ok(());
     }
+    let is_live = live.as_deref() == Some("1");
 
-    if live.as_deref() == Some("1") && cli.model.is_none() {
+    if is_live && cli.model.is_none() {
         anyhow::bail!("--model <dated-model-id> is required for live runs");
     }
+    let api_key = std::env::var("ANTHROPIC_API_KEY").ok();
+    if is_live && api_key.is_none() {
+        anyhow::bail!("ANTHROPIC_API_KEY is required for live runs");
+    }
+    if cli.reps == 0 {
+        anyhow::bail!("--reps must be at least 1");
+    }
 
-    // Matrix orchestration lands in Task 7 (runner); until it is wired in,
-    // a gate-open invocation has nothing to execute.
-    anyhow::bail!("the run matrix is not wired up yet (plan Task 7: runner)")
+    let mut tasks = task::load_tasks(&task::default_tasks_dir())?;
+    if !cli.tasks.is_empty() {
+        for id in &cli.tasks {
+            if !tasks.iter().any(|t| &t.manifest.id == id) {
+                anyhow::bail!("unknown task id {id:?} (not found under bench/tasks/)");
+            }
+        }
+        tasks.retain(|t| cli.tasks.contains(&t.manifest.id));
+    }
+    let mut harnesses = harness::all();
+    if !cli.harnesses.is_empty() {
+        for name in &cli.harnesses {
+            if !harnesses.iter().any(|h| h.name() == name) {
+                anyhow::bail!("unknown harness {name:?} (expected gantry | claude-code | pi)");
+            }
+        }
+        harnesses.retain(|h| cli.harnesses.iter().any(|n| n == h.name()));
+    }
+    let mut reps = cli.reps;
+    if cli.smoke {
+        (tasks, harnesses) = runner::smoke_selection(tasks, harnesses)?;
+        reps = 1;
+    }
+
+    let model = cli
+        .model
+        .clone()
+        .unwrap_or_else(|| SMOKE_FALLBACK_MODEL.to_string());
+    let out_dir = cli.out.clone().unwrap_or_else(runner::default_out_dir);
+    // Judge with the benchmark's pinned model; live runs only — keyless mock
+    // runs grade rubric tasks as failed-judge instead of calling out.
+    let judge = if is_live {
+        Some(JudgeConfig::new(
+            model.clone(),
+            api_key.clone().expect("checked above for live runs"),
+        ))
+    } else {
+        None
+    };
+
+    let cfg = RunnerConfig {
+        tasks,
+        harnesses,
+        reps,
+        model,
+        api_key: api_key.unwrap_or_else(|| "gantry-bench-keyless".to_string()),
+        upstream: proxy::upstream_from_env(),
+        out_dir: out_dir.clone(),
+        cache: RepoCache::shared(),
+        judge,
+        gantry_sha: runner::gantry_sha(),
+        max_tokens: NON_BINDING_MAX_TOKENS,
+    };
+    let records = runner::run_suite(&cfg).await?;
+
+    let count = |o: RunOutcome| records.iter().filter(|r| r.run.outcome == o).count();
+    println!(
+        "gantry-bench: {} runs ({} completed, {} timeout, {} crashed) → {}",
+        records.len(),
+        count(RunOutcome::Completed),
+        count(RunOutcome::Timeout),
+        count(RunOutcome::Crashed),
+        out_dir.display(),
+    );
+    Ok(())
 }
 
 #[cfg(test)]
