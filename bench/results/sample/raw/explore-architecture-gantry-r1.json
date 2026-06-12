@@ -1,0 +1,55 @@
+{
+  "run": {
+    "task_id": "explore-architecture",
+    "harness": "gantry",
+    "rep": 1,
+    "outcome": "completed",
+    "wall_ms": 75,
+    "exit_code": 0,
+    "answer": "Mock-upstream smoke response: canned answer used to validate gantry-bench plumbing end-to-end. It intentionally does not describe the repository.",
+    "ledger": {
+      "entries": [
+        {
+          "seq": 0,
+          "ts_ms": 1781247347635,
+          "latency_ms": 1,
+          "model": "claude-haiku-4-5",
+          "stream": false,
+          "status": 200,
+          "usage": {
+            "input_tokens": 1200,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 0,
+            "output_tokens": 42
+          },
+          "stop_reason": "end_turn",
+          "tool_uses": [],
+          "request_bytes": 3357,
+          "response_bytes": 405,
+          "message_count": 1,
+          "tools_bytes": 1926
+        }
+      ],
+      "untracked_requests": 0,
+      "untracked_bytes": 0
+    },
+    "workspace_diff": "",
+    "stderr_tail": "",
+    "harness_version": "bae78dc8a950",
+    "gantry_sha": "bae78dc8a950f631dd25de3bd98e3f9eff52f98b",
+    "model": "claude-haiku-4-5"
+  },
+  "grade": {
+    "checks": [
+      {
+        "name": "judge",
+        "pass": false,
+        "detail": "judge unavailable: rubric present but no judge configured (keyless run)"
+      }
+    ],
+    "judge_score": null,
+    "judge_rationale": null,
+    "judge_usage": null,
+    "success": false
+  }
+}
