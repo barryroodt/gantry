@@ -16,10 +16,12 @@ use crate::provider::{
 pub struct OpenAiProvider {
     model: String,
     client: openai::Client,
+    provider: Provider,
 }
 
 impl OpenAiProvider {
-    pub fn new(model: String) -> anyhow::Result<Self> {
+    /// Hosted OpenAI: requires `OPENAI_API_KEY`, honors `OPENAI_BASE_URL`.
+    pub fn openai(model: String) -> anyhow::Result<Self> {
         let api_key = std::env::var("OPENAI_API_KEY")
             .map_err(|_| anyhow::anyhow!("OPENAI_API_KEY not set"))?;
 
@@ -33,7 +35,30 @@ impl OpenAiProvider {
             .build()
             .map_err(|e| anyhow::anyhow!("failed to build OpenAI client: {e}"))?;
 
-        Ok(Self { model, client })
+        Ok(Self {
+            model,
+            client,
+            provider: Provider::OpenAi,
+        })
+    }
+
+    /// Generic OpenAI-compatible local/self-hosted server (oMLX, Ollama, vLLM,
+    /// LM Studio). `base_url` is required (already resolved by the caller);
+    /// `api_key` is optional — most local servers need none, so a placeholder
+    /// bearer is sent when absent (the server ignores it when auth is off).
+    pub fn local(model: String, base_url: String, api_key: Option<String>) -> anyhow::Result<Self> {
+        let api_key = api_key.unwrap_or_else(|| "local".to_string());
+        let client = openai::Client::builder()
+            .api_key(api_key)
+            .base_url(base_url)
+            .build()
+            .map_err(|e| anyhow::anyhow!("failed to build local OpenAI-compatible client: {e}"))?;
+
+        Ok(Self {
+            model,
+            client,
+            provider: Provider::Local,
+        })
     }
 }
 
@@ -164,7 +189,7 @@ fn openai_response_to_provider(
 #[async_trait]
 impl ProviderAdapter for OpenAiProvider {
     fn provider(&self) -> Provider {
-        Provider::OpenAi
+        self.provider.clone()
     }
 
     fn model(&self) -> &str {

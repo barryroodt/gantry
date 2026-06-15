@@ -73,6 +73,12 @@ pub struct Cli {
     /// modes only — no effect in team mode (its passes are bounded).
     #[arg(long = "context-limit", value_name = "TOKENS", value_parser = clap::value_parser!(u64).range(1..))]
     pub context_limit: Option<u64>,
+
+    /// Base URL for the `local` provider's OpenAI-compatible endpoint, e.g.
+    /// `http://localhost:8000/v1` (oMLX). Takes precedence over
+    /// `GANTRY_LOCAL_BASE_URL`. Only valid with a `local/...` model slug.
+    #[arg(long = "base-url", value_name = "URL")]
+    pub base_url: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, ValueEnum, Deserialize)]
@@ -100,6 +106,9 @@ pub enum Provider {
     Anthropic,
     OpenAi,
     Gemini,
+    /// Generic OpenAI-compatible local/self-hosted server (e.g. oMLX, Ollama,
+    /// vLLM, LM Studio). Endpoint via `--base-url`/`GANTRY_LOCAL_BASE_URL`.
+    Local,
 }
 
 impl Provider {
@@ -108,6 +117,7 @@ impl Provider {
             Self::Anthropic => "anthropic",
             Self::OpenAi => "openai",
             Self::Gemini => "gemini",
+            Self::Local => "local",
         }
     }
 
@@ -117,6 +127,7 @@ impl Provider {
             "anthropic" => Some(Self::Anthropic),
             "openai" => Some(Self::OpenAi),
             "gemini" => Some(Self::Gemini),
+            "local" => Some(Self::Local),
             _ => None,
         }
     }
@@ -129,11 +140,14 @@ pub enum ConfigError {
     )]
     MissingProviderPrefix { model: String },
 
-    #[error("unknown provider '{provider}' in model slug (expected anthropic|openai|gemini)")]
+    #[error("unknown provider '{provider}' in model slug (expected anthropic|openai|gemini|local)")]
     UnknownProvider { provider: String },
 
     #[error("model id is empty after provider in slug: {slug}")]
     EmptyModel { slug: String },
+
+    #[error("--base-url is only valid with the local provider (a 'local/...' model slug), but provider is '{provider}'")]
+    BaseUrlNotLocal { provider: String },
 
     #[error("CLI parse error: {0}")]
     CliParse(String),
@@ -189,6 +203,7 @@ pub struct Validated {
     pub isolate: bool,
     pub max_iterations: u32,
     pub context_limit: Option<u64>,
+    pub base_url: Option<String>,
 }
 
 impl Cli {
@@ -220,6 +235,11 @@ impl Cli {
             return Err(ConfigError::PromptFileMissing(self.prompt_file.clone()));
         }
         let (provider, model) = parse_model_slug(&self.model)?;
+        if self.base_url.is_some() && provider != Provider::Local {
+            return Err(ConfigError::BaseUrlNotLocal {
+                provider: provider.as_str().to_string(),
+            });
+        }
 
         let profile = match self.profile.as_deref() {
             Some(dir) => Some(crate::profile::load_profile(dir)?),
@@ -311,6 +331,7 @@ impl Cli {
             isolate,
             max_iterations,
             context_limit: self.context_limit,
+            base_url: self.base_url,
         })
     }
 

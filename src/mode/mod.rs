@@ -53,7 +53,11 @@ pub(crate) fn bootstrap(validated: &Validated) -> Result<RunBootstrap, ModeRunOu
     let watchdog = spawn_timeout_watchdog(cancel.clone(), validated.timeout_ms);
     let signal = spawn_signal_handler(cancel.clone());
 
-    let provider = build_adapter(validated.provider.clone(), validated.model.clone())
+    let provider = build_adapter(
+        validated.provider.clone(),
+        validated.model.clone(),
+        validated.base_url.clone(),
+    )
         .map_err(|e| config_error(&meter, &e.to_string()))?;
     let prompt = std::fs::read_to_string(&validated.prompt_file)
         .map_err(|e| config_error(&meter, &format!("prompt file: {e}")))?;
