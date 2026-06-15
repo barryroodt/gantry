@@ -212,11 +212,20 @@ mod tests {
     #[test]
     fn resolve_base_url_precedence() {
         // flag wins
-        assert_eq!(resolve_base_url(Some("http://flag/v1"), Some("http://env/v1")), "http://flag/v1");
+        assert_eq!(
+            resolve_base_url(Some("http://flag/v1"), Some("http://env/v1")),
+            "http://flag/v1"
+        );
         // blank flag falls through to env
-        assert_eq!(resolve_base_url(Some("   "), Some("http://env/v1")), "http://env/v1");
+        assert_eq!(
+            resolve_base_url(Some("   "), Some("http://env/v1")),
+            "http://env/v1"
+        );
         // env when no flag
-        assert_eq!(resolve_base_url(None, Some("http://env/v1")), "http://env/v1");
+        assert_eq!(
+            resolve_base_url(None, Some("http://env/v1")),
+            "http://env/v1"
+        );
         // default when neither
         assert_eq!(resolve_base_url(None, None), LOCAL_DEFAULT_BASE_URL);
         // blank env also falls through to default

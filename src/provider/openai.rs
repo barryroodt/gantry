@@ -302,7 +302,9 @@ mod local_error_tests {
         );
         assert!(is_connection_error(&refused));
         // A normal API error is not a connection failure.
-        assert!(!is_connection_error(&anyhow::anyhow!("404 Not Found: model missing")));
+        assert!(!is_connection_error(&anyhow::anyhow!(
+            "404 Not Found: model missing"
+        )));
     }
 
     #[test]

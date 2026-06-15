@@ -426,9 +426,12 @@ async fn local_posts_to_resolved_base_url_without_api_key() {
     // No OpenAI key/base env at all — the local provider must not depend on them.
     let _env = EnvVarGuard::set_many(&[("OPENAI_API_KEY", None), ("OPENAI_BASE_URL", None)]);
 
-    let provider =
-        OpenAiProvider::local("qwen3-coder-next".into(), openai_base_url(&mock_server), None)
-            .expect("local provider builds");
+    let provider = OpenAiProvider::local(
+        "qwen3-coder-next".into(),
+        openai_base_url(&mock_server),
+        None,
+    )
+    .expect("local provider builds");
     assert_eq!(provider.provider(), gantry::cli::Provider::Local);
 
     let tools = [ToolSchema {

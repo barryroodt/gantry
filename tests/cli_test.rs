@@ -197,7 +197,10 @@ fn base_url_accepted_and_threaded_for_local_provider() {
     .expect("local provider accepts --base-url");
     assert_eq!(validated.provider, Provider::Local);
     assert_eq!(validated.model, "qwen3-coder-next");
-    assert_eq!(validated.base_url.as_deref(), Some("http://localhost:9999/v1"));
+    assert_eq!(
+        validated.base_url.as_deref(),
+        Some("http://localhost:9999/v1")
+    );
 }
 
 #[test]

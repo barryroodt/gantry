@@ -140,7 +140,9 @@ pub enum ConfigError {
     )]
     MissingProviderPrefix { model: String },
 
-    #[error("unknown provider '{provider}' in model slug (expected anthropic|openai|gemini|local)")]
+    #[error(
+        "unknown provider '{provider}' in model slug (expected anthropic|openai|gemini|local)"
+    )]
     UnknownProvider { provider: String },
 
     #[error("model id is empty after provider in slug: {slug}")]
