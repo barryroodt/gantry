@@ -22,6 +22,10 @@ pub struct OpenAiProvider {
     base_url: Option<String>,
 }
 
+/// Bearer sent to a local server when no key is configured; servers that
+/// don't enforce auth ignore it.
+const PLACEHOLDER_API_KEY: &str = "local";
+
 impl OpenAiProvider {
     /// Hosted OpenAI: requires `OPENAI_API_KEY`, honors `OPENAI_BASE_URL`.
     pub fn openai(model: String) -> anyhow::Result<Self> {
@@ -51,7 +55,7 @@ impl OpenAiProvider {
     /// `api_key` is optional — most local servers need none, so a placeholder
     /// bearer is sent when absent (the server ignores it when auth is off).
     pub fn local(model: String, base_url: String, api_key: Option<String>) -> anyhow::Result<Self> {
-        let api_key = api_key.unwrap_or_else(|| "local".to_string());
+        let api_key = api_key.unwrap_or_else(|| PLACEHOLDER_API_KEY.to_string());
         let client = openai::Client::builder()
             .api_key(api_key)
             .base_url(&base_url)
@@ -212,11 +216,14 @@ impl ProviderAdapter for OpenAiProvider {
             Box::pin(self.complete_once(system, messages, tools))
         })
         .await;
-        match result {
-            Err(e) if self.provider == Provider::Local && is_connection_error(&e) => {
-                Err(local_unreachable_error(self.base_url.as_deref(), e))
+        // When the endpoint was explicitly configured (always for `local`, and
+        // for hosted OpenAI when OPENAI_BASE_URL is set), name it on a
+        // connection failure so an unreachable server is self-explanatory.
+        match (&self.base_url, result) {
+            (Some(base), Err(e)) if is_connection_error(&e) => {
+                Err(endpoint_unreachable_error(base, e))
             }
-            other => other,
+            (_, other) => other,
         }
     }
 }
@@ -281,12 +288,11 @@ fn is_connection_error(err: &anyhow::Error) -> bool {
     .any(|m| msg.contains(m))
 }
 
-/// Wrap an unreachable-server error from the `local` provider with a hint that
-/// names the endpoint, so the failure is self-explanatory.
-fn local_unreachable_error(base_url: Option<&str>, source: anyhow::Error) -> anyhow::Error {
+/// Wrap a connection failure with a hint naming the endpoint, so an unreachable
+/// server is self-explanatory.
+fn endpoint_unreachable_error(base_url: &str, source: anyhow::Error) -> anyhow::Error {
     anyhow::anyhow!(
-        "could not reach the local server at {} — is it running? (underlying error: {source:#})",
-        base_url.unwrap_or("the configured base URL"),
+        "could not reach the server at {base_url} — is it running? (underlying error: {source:#})"
     )
 }
 
@@ -309,8 +315,8 @@ mod local_error_tests {
 
     #[test]
     fn hint_names_the_endpoint() {
-        let wrapped = local_unreachable_error(
-            Some("http://localhost:8000/v1"),
+        let wrapped = endpoint_unreachable_error(
+            "http://localhost:8000/v1",
             anyhow::anyhow!("tcp connect error: Connection refused"),
         );
         let msg = wrapped.to_string();
