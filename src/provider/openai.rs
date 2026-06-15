@@ -17,6 +17,9 @@ pub struct OpenAiProvider {
     model: String,
     client: openai::Client,
     provider: Provider,
+    /// Endpoint this adapter targets, used only to make `local` connection
+    /// failures self-explanatory. `None` for hosted OpenAI on its default base.
+    base_url: Option<String>,
 }
 
 impl OpenAiProvider {
@@ -25,9 +28,9 @@ impl OpenAiProvider {
         let api_key = std::env::var("OPENAI_API_KEY")
             .map_err(|_| anyhow::anyhow!("OPENAI_API_KEY not set"))?;
 
+        let base_url = std::env::var("OPENAI_BASE_URL").ok();
         let mut builder = openai::Client::builder().api_key(api_key);
-
-        if let Ok(base_url) = std::env::var("OPENAI_BASE_URL") {
+        if let Some(base_url) = &base_url {
             builder = builder.base_url(base_url);
         }
 
@@ -39,6 +42,7 @@ impl OpenAiProvider {
             model,
             client,
             provider: Provider::OpenAi,
+            base_url,
         })
     }
 
@@ -50,7 +54,7 @@ impl OpenAiProvider {
         let api_key = api_key.unwrap_or_else(|| "local".to_string());
         let client = openai::Client::builder()
             .api_key(api_key)
-            .base_url(base_url)
+            .base_url(&base_url)
             .build()
             .map_err(|e| anyhow::anyhow!("failed to build local OpenAI-compatible client: {e}"))?;
 
@@ -58,6 +62,7 @@ impl OpenAiProvider {
             model,
             client,
             provider: Provider::Local,
+            base_url: Some(base_url),
         })
     }
 }
@@ -203,10 +208,16 @@ impl ProviderAdapter for OpenAiProvider {
         tools: &[ToolSchema],
     ) -> anyhow::Result<ProviderResponse> {
         let config = RetryConfig::default();
-        with_retry(&config, classify_error, || {
+        let result = with_retry(&config, classify_error, || {
             Box::pin(self.complete_once(system, messages, tools))
         })
-        .await
+        .await;
+        match result {
+            Err(e) if self.provider == Provider::Local && is_connection_error(&e) => {
+                Err(local_unreachable_error(self.base_url.as_deref(), e))
+            }
+            other => other,
+        }
     }
 }
 
@@ -251,5 +262,57 @@ impl OpenAiProvider {
             .map_err(|e| anyhow::anyhow!("{e}"))?;
 
         openai_response_to_provider(response.raw_response)
+    }
+}
+
+/// Best-effort detection of a "server unreachable" error (rig wraps reqwest, so
+/// we match on text — same approach as `retry::classify_error`).
+fn is_connection_error(err: &anyhow::Error) -> bool {
+    let msg = format!("{err:#}").to_lowercase();
+    [
+        "connection refused",
+        "tcp connect",
+        "error sending request",
+        "connection reset",
+        "connect error",
+        "dns error",
+    ]
+    .iter()
+    .any(|m| msg.contains(m))
+}
+
+/// Wrap an unreachable-server error from the `local` provider with a hint that
+/// names the endpoint, so the failure is self-explanatory.
+fn local_unreachable_error(base_url: Option<&str>, source: anyhow::Error) -> anyhow::Error {
+    anyhow::anyhow!(
+        "could not reach the local server at {} — is it running? (underlying error: {source:#})",
+        base_url.unwrap_or("the configured base URL"),
+    )
+}
+
+#[cfg(test)]
+mod local_error_tests {
+    use super::*;
+
+    #[test]
+    fn detects_connection_errors() {
+        let refused = anyhow::anyhow!(
+            "error sending request for url (http://localhost:8000/v1/chat/completions): \
+             tcp connect error: Connection refused (os error 61)"
+        );
+        assert!(is_connection_error(&refused));
+        // A normal API error is not a connection failure.
+        assert!(!is_connection_error(&anyhow::anyhow!("404 Not Found: model missing")));
+    }
+
+    #[test]
+    fn hint_names_the_endpoint() {
+        let wrapped = local_unreachable_error(
+            Some("http://localhost:8000/v1"),
+            anyhow::anyhow!("tcp connect error: Connection refused"),
+        );
+        let msg = wrapped.to_string();
+        assert!(msg.contains("http://localhost:8000/v1"));
+        assert!(msg.contains("is it running?"));
     }
 }
