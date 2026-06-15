@@ -22,6 +22,16 @@ Priorities: **P1** active friction / correctness-adjacent · **P2** worth doing 
   shared with compose (where it *is* correct), so **do not special-case it** — noted only.
   Revisit if the compose and unify directives ever need to diverge.
 
+- [ ] **P2 — gantry hard-fails on Anthropic model ids rig does not recognize.**
+  `src/provider/anthropic.rs` never sets a per-request `max_tokens`; rig derives it from
+  the model-id prefix (`default_max_tokens_for_model`) and errors with
+  ``"`max_tokens` must be set for Anthropic"`` on unknown ids — before any request is
+  sent. Surfaced by gantry-bench's mock-upstream smoke (its fallback id must be
+  registry-known as a workaround, see `bench/src/main.rs`). Any newly released Anthropic
+  model breaks the same way until rig updates. **Fix:** pass an explicit request
+  `max_tokens` derived from gantry's remaining token budget (`--max-tokens` minus spend),
+  clamped to a sane ceiling, so unknown ids work and the budget actually bounds each turn.
+
 ## Build & CI
 
 - [x] **P2 — Rust version duplicated, no single source of truth.** Done — CI now reads the

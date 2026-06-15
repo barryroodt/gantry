@@ -1,0 +1,38 @@
+[package]
+name = "gantry-bench"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.96"
+license = "Apache-2.0"
+publish = false
+
+# All dependencies for Tasks 1-9 are declared up front so parallel workers
+# never edit this manifest. Versions match the workspace Cargo.lock where the
+# crate is already in the tree; otherwise current stable.
+[dependencies]
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+toml = "0.8"
+clap = { version = "4", features = ["derive"] }
+tokio = { version = "1", features = ["full"] }
+# Recorder proxy (Task 2)
+axum = "0.8"
+hyper = { version = "1", features = ["full"] }
+hyper-util = { version = "0.1", features = ["client", "client-legacy", "http1", "tokio"] }
+http-body-util = "0.1"
+futures-util = "0.3"
+bytes = "1"
+# Judge client (Task 5)
+reqwest = { version = "0.13", features = ["json", "stream"] }
+# Grading checks (Task 5)
+regex = "1"
+globset = "0.4"
+# Workspace materialization (Task 3) + hermetic config dirs (Task 4)
+tempfile = "3"
+# Results directory timestamps (Task 7)
+chrono = "0.4"
+
+[dev-dependencies]
+tempfile = "3"
+wiremock = "0.6"

@@ -68,3 +68,47 @@ jobs:
 
       - name: Test
         run: cargo test --workspace --locked
+
+  # Builds the bench Docker image and runs the keyless smoke inside it.
+  # Continuously proves: the image builds, both competitor-CLI pins still
+  # install, and the bench pipeline runs end-to-end on Linux — no API key.
+  bench-docker-smoke:
+    name: bench docker smoke
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+
+      - name: Build bench image
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+        with:
+          context: .
+          file: bench/docker/Dockerfile
+          tags: gantry-bench:ci
+          load: true
+          build-args: |
+            GANTRY_SHA=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Run keyless smoke
+        run: |
+          mkdir -p bench-results
+          docker run --rm -v "$PWD/bench-results:/results" gantry-bench:ci smoke
+
+      - name: Assert artifacts
+        run: |
+          out=$(find bench-results -mindepth 1 -maxdepth 1 -type d | head -1)
+          test -n "$out"
+          test -f "$out/results.json"
+          test -f "$out/report.md"
+          ls "$out"/raw/*.json
+
+      - name: Upload smoke results
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: bench-docker-smoke-results
+          path: bench-results/

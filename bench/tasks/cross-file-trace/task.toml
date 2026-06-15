@@ -1,0 +1,30 @@
+# Repo: sharkdp/hyperfine — same pin as explore-architecture (one bare clone
+# in the bench cache serves both tasks). MIT OR Apache-2.0, ~6k LOC, stable.
+# SHA: release tag v1.20.0 (2026-04-30).
+# Trace ground truth, verified by hand against the pinned checkout:
+#   src/cli.rs:302        Arg::new("export-json").long("export-json")
+#   src/main.rs:37        ExportManager::from_cli_arguments(...)
+#   src/export/mod.rs:94  add_exporter("export-json", ExportType::Json)
+#   src/export/mod.rs:107 ExportType::Json => Box::<JsonExporter>::default()
+#   src/export/json.rs:17 JsonExporter (impl Exporter)
+#   src/benchmark/scheduler.rs:55,157  write_results(...) during the run and
+#                          from final_export() (called by main.rs run())
+#   src/export/mod.rs:132 write_results -> :158 write_to_file
+id = "cross-file-trace"
+kind = "locate"
+
+[workspace]
+repo_url = "https://github.com/sharkdp/hyperfine.git"
+sha = "975fe108c4ee7bd2600d10758207b44ca3dae738"
+
+[grading]
+# One regex per waypoint; alternatives accept the file path or the key
+# symbol at that step. Every alternative verified to exist in the pinned
+# checkout at the lines listed above.
+answer_contains = [
+    "cli\\.rs",
+    "ExportManager|from_cli_arguments",
+    "JsonExporter|export/json\\.rs",
+    "write_results|write_to_file",
+    "scheduler\\.rs|final_export",
+]

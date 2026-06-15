@@ -1,0 +1,38 @@
+# Repo: nothings/stb — single-file public-domain (or MIT, dual) C libraries;
+# ~6 MB repo, very stable history. The haystack is stb_image.h: one
+# 7,988-line file. The questions force digesting that one file: the
+# dimension-limit macro and its error strings sit mid-file (~line 796 and
+# ~line 3272), and the nine format-detection functions are spread across
+# the whole file (~line 909 through ~line 7494).
+# SHA: master as of 2026-04-15 (latest at task-authoring time).
+# Ground truth verified by hand against the pinned checkout:
+#   line 795-796:  #ifndef STBI_MAX_DIMENSIONS
+#                  #define STBI_MAX_DIMENSIONS (1 << 24)
+#   line 3272 etc: stbi__err("too large","Very large image (corrupt?)")
+#   _test fns:     stbi__{jpeg,png,bmp,tga,psd,hdr,pic,gif,pnm}_test
+id = "needle-haystack"
+kind = "explore"
+
+[workspace]
+repo_url = "https://github.com/nothings/stb.git"
+sha = "31c1ad37456438565541f4919958214b6e762fb4"
+
+[grading]
+# Every pattern verified against the pinned stb_image.h (see lines above).
+# The numeric limit accepts the source form and common spellings of the
+# evaluated value.
+answer_contains = [
+    "STBI_MAX_DIMENSIONS",
+    "1\\s*<<\\s*24|16777216|16,777,216|2\\^24|2\\*\\*24",
+    "(?i)too large",
+    "(?i)very large image",
+    "stbi__jpeg_test",
+    "stbi__png_test",
+    "stbi__bmp_test",
+    "stbi__tga_test",
+    "stbi__psd_test",
+    "stbi__hdr_test",
+    "stbi__pic_test",
+    "stbi__gif_test",
+    "stbi__pnm_test",
+]

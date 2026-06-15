@@ -1,0 +1,17 @@
+# Repo: sharkdp/hyperfine — CLI benchmarking tool, MIT OR Apache-2.0, ~6k LOC
+# Rust, very stable history. Mid-size with a crisp layered architecture
+# (cli -> options/commands -> scheduler/executor/timer -> output/export),
+# which makes architecture explanations objectively gradeable.
+# SHA: release tag v1.20.0 (2026-04-30) — a tagged release, immutable and
+# reproducible. Same pin is shared with cross-file-trace so the bench clone
+# cache holds one bare clone for both tasks.
+id = "explore-architecture"
+kind = "explore"
+
+[workspace]
+repo_url = "https://github.com/sharkdp/hyperfine.git"
+sha = "975fe108c4ee7bd2600d10758207b44ca3dae738"
+
+# Judge-graded only (rubric.md): there is no single substring that separates a
+# real architecture explanation from a fabricated one.
+[grading]

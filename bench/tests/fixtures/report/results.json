@@ -1,0 +1,482 @@
+[
+  {
+    "run": {
+      "task_id": "explore-architecture",
+      "harness": "gantry",
+      "rep": 1,
+      "outcome": "completed",
+      "wall_ms": 9000,
+      "exit_code": 0,
+      "answer": "Layered CLI: provider -> mode -> tools.",
+      "ledger": {
+        "entries": [
+          {
+            "seq": 0,
+            "ts_ms": 1760000000000,
+            "latency_ms": 2100,
+            "model": "claude-sonnet-4-5-20250929",
+            "stream": true,
+            "status": 200,
+            "usage": {
+              "input_tokens": 1200,
+              "cache_creation_input_tokens": 3000,
+              "cache_read_input_tokens": 0,
+              "output_tokens": 350
+            },
+            "stop_reason": "tool_use",
+            "tool_uses": ["read_file"],
+            "request_bytes": 14000,
+            "response_bytes": 2300,
+            "message_count": 1,
+            "tools_bytes": 6200
+          },
+          {
+            "seq": 1,
+            "ts_ms": 1760000004000,
+            "latency_ms": 2600,
+            "model": "claude-sonnet-4-5-20250929",
+            "stream": true,
+            "status": 200,
+            "usage": {
+              "input_tokens": 80,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 3000,
+              "output_tokens": 420
+            },
+            "stop_reason": "end_turn",
+            "tool_uses": [],
+            "request_bytes": 16800,
+            "response_bytes": 2900,
+            "message_count": 3,
+            "tools_bytes": 6200
+          }
+        ],
+        "untracked_requests": 0,
+        "untracked_bytes": 0
+      },
+      "workspace_diff": "",
+      "stderr_tail": "",
+      "harness_version": "0.4.0+abc1234",
+      "gantry_sha": "abc1234def",
+      "model": "claude-sonnet-4-5-20250929"
+    },
+    "grade": {
+      "checks": [
+        { "name": "answer_contains:provider", "pass": true, "detail": null }
+      ],
+      "judge_score": 8.5,
+      "judge_rationale": "Names key modules; data flow correct.",
+      "judge_usage": { "model": "claude-sonnet-4-5-20250929", "input_tokens": 1180, "output_tokens": 62 },
+      "success": true
+    }
+  },
+  {
+    "run": {
+      "task_id": "explore-architecture",
+      "harness": "gantry",
+      "rep": 2,
+      "outcome": "completed",
+      "wall_ms": 7000,
+      "exit_code": 0,
+      "answer": "Pipeline of provider, mode, tools modules.",
+      "ledger": {
+        "entries": [
+          {
+            "seq": 0,
+            "ts_ms": 1760000100000,
+            "latency_ms": 4200,
+            "model": "claude-sonnet-4-5-20250929",
+            "stream": true,
+            "status": 200,
+            "usage": {
+              "input_tokens": 1500,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "output_tokens": 600
+            },
+            "stop_reason": "end_turn",
+            "tool_uses": [],
+            "request_bytes": 15000,
+            "response_bytes": 3400,
+            "message_count": 1,
+            "tools_bytes": 6200
+          }
+        ],
+        "untracked_requests": 0,
+        "untracked_bytes": 0
+      },
+      "workspace_diff": "",
+      "stderr_tail": "",
+      "harness_version": "0.4.0+abc1234",
+      "gantry_sha": "abc1234def",
+      "model": "claude-sonnet-4-5-20250929"
+    },
+    "grade": {
+      "checks": [
+        { "name": "answer_contains:provider", "pass": true, "detail": null }
+      ],
+      "judge_score": 7.0,
+      "judge_rationale": "Correct but shallow on data flow.",
+      "judge_usage": { "model": "claude-sonnet-4-5-20250929", "input_tokens": 1240, "output_tokens": 55 },
+      "success": true
+    }
+  },
+  {
+    "run": {
+      "task_id": "explore-architecture",
+      "harness": "gantry",
+      "rep": 3,
+      "outcome": "completed",
+      "wall_ms": 11000,
+      "exit_code": 0,
+      "answer": "CLI dispatches modes; modes drive provider + tool registry.",
+      "ledger": {
+        "entries": [
+          {
+            "seq": 0,
+            "ts_ms": 1760000200000,
+            "latency_ms": 1900,
+            "model": "claude-sonnet-4-5-20250929",
+            "stream": true,
+            "status": 200,
+            "usage": {
+              "input_tokens": 900,
+              "cache_creation_input_tokens": 500,
+              "cache_read_input_tokens": 0,
+              "output_tokens": 200
+            },
+            "stop_reason": "tool_use",
+            "tool_uses": ["read_file", "search"],
+            "request_bytes": 13900,
+            "response_bytes": 1800,
+            "message_count": 1,
+            "tools_bytes": 6200
+          },
+          {
+            "seq": 1,
+            "ts_ms": 1760000203000,
+            "latency_ms": 2300,
+            "model": "claude-sonnet-4-5-20250929",
+            "stream": true,
+            "status": 200,
+            "usage": {
+              "input_tokens": 700,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 1000,
+              "output_tokens": 250
+            },
+            "stop_reason": "tool_use",
+            "tool_uses": ["read_file"],
+            "request_bytes": 15600,
+            "response_bytes": 2000,
+            "message_count": 3,
+            "tools_bytes": 6200
+          },
+          {
+            "seq": 2,
+            "ts_ms": 1760000207000,
+            "latency_ms": 2800,
+            "model": "claude-sonnet-4-5-20250929",
+            "stream": true,
+            "status": 200,
+            "usage": {
+              "input_tokens": 400,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "output_tokens": 350
+            },
+            "stop_reason": "end_turn",
+            "tool_uses": [],
+            "request_bytes": 17200,
+            "response_bytes": 2500,
+            "message_count": 5,
+            "tools_bytes": 6200
+          }
+        ],
+        "untracked_requests": 0,
+        "untracked_bytes": 0
+      },
+      "workspace_diff": "",
+      "stderr_tail": "",
+      "harness_version": "0.4.0+abc1234",
+      "gantry_sha": "abc1234def",
+      "model": "claude-sonnet-4-5-20250929"
+    },
+    "grade": {
+      "checks": [
+        { "name": "answer_contains:provider", "pass": true, "detail": null }
+      ],
+      "judge_score": 9.0,
+      "judge_rationale": "Complete and precise.",
+      "judge_usage": { "model": "claude-sonnet-4-5-20250929", "input_tokens": 990, "output_tokens": 48 },
+      "success": true
+    }
+  },
+  {
+    "run": {
+      "task_id": "explore-architecture",
+      "harness": "claude-code",
+      "rep": 1,
+      "outcome": "completed",
+      "wall_ms": 30000,
+      "exit_code": 0,
+      "answer": "The repository implements a layered agent harness.",
+      "ledger": {
+        "entries": [
+          {
+            "seq": 0,
+            "ts_ms": 1760001000000,
+            "latency_ms": 9000,
+            "model": "claude-sonnet-4-5-20250929",
+            "stream": true,
+            "status": 200,
+            "usage": {
+              "input_tokens": 4000,
+              "cache_creation_input_tokens": 8000,
+              "cache_read_input_tokens": 0,
+              "output_tokens": 700
+            },
+            "stop_reason": "tool_use",
+            "tool_uses": ["Bash", "Read"],
+            "request_bytes": 52000,
+            "response_bytes": 4100,
+            "message_count": 1,
+            "tools_bytes": 21000
+          },
+          {
+            "seq": 1,
+            "ts_ms": 1760001012000,
+            "latency_ms": 8000,
+            "model": "claude-sonnet-4-5-20250929",
+            "stream": true,
+            "status": 200,
+            "usage": {
+              "input_tokens": 1000,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 20000,
+              "output_tokens": 800
+            },
+            "stop_reason": "end_turn",
+            "tool_uses": ["Edit"],
+            "request_bytes": 58000,
+            "response_bytes": 4600,
+            "message_count": 3,
+            "tools_bytes": 21000
+          }
+        ],
+        "untracked_requests": 1,
+        "untracked_bytes": 1024
+      },
+      "workspace_diff": "",
+      "stderr_tail": "",
+      "harness_version": "2.0.55",
+      "gantry_sha": "abc1234def",
+      "model": "claude-sonnet-4-5-20250929"
+    },
+    "grade": {
+      "checks": [
+        { "name": "answer_contains:provider", "pass": true, "detail": null }
+      ],
+      "judge_score": 7.5,
+      "judge_rationale": "Good coverage, one vague data-flow claim.",
+      "judge_usage": { "model": "claude-sonnet-4-5-20250929", "input_tokens": 1105, "output_tokens": 71 },
+      "success": true
+    }
+  },
+  {
+    "run": {
+      "task_id": "explore-architecture",
+      "harness": "claude-code",
+      "rep": 2,
+      "outcome": "completed",
+      "wall_ms": 25000,
+      "exit_code": 0,
+      "answer": "Harness with pluggable providers and a tool registry.",
+      "ledger": {
+        "entries": [
+          {
+            "seq": 0,
+            "ts_ms": 1760002000000,
+            "latency_ms": 11000,
+            "model": "claude-sonnet-4-5-20250929",
+            "stream": true,
+            "status": 200,
+            "usage": {
+              "input_tokens": 6000,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "output_tokens": 1200
+            },
+            "stop_reason": "end_turn",
+            "tool_uses": ["Bash"],
+            "request_bytes": 54000,
+            "response_bytes": 6800,
+            "message_count": 1,
+            "tools_bytes": 21000
+          }
+        ],
+        "untracked_requests": 0,
+        "untracked_bytes": 0
+      },
+      "workspace_diff": "",
+      "stderr_tail": "",
+      "harness_version": "2.0.55",
+      "gantry_sha": "abc1234def",
+      "model": "claude-sonnet-4-5-20250929"
+    },
+    "grade": {
+      "checks": [
+        { "name": "answer_contains:provider", "pass": true, "detail": null }
+      ],
+      "judge_score": 6.5,
+      "judge_rationale": "Adequate; misses the mode layer.",
+      "judge_usage": { "model": "claude-sonnet-4-5-20250929", "input_tokens": 1330, "output_tokens": 59 },
+      "success": true
+    }
+  },
+  {
+    "run": {
+      "task_id": "explore-architecture",
+      "harness": "claude-code",
+      "rep": 3,
+      "outcome": "timeout",
+      "wall_ms": 600000,
+      "exit_code": null,
+      "answer": null,
+      "ledger": {
+        "entries": [
+          {
+            "seq": 0,
+            "ts_ms": 1760003000000,
+            "latency_ms": 45000,
+            "model": "claude-sonnet-4-5-20250929",
+            "stream": true,
+            "status": 200,
+            "usage": {
+              "input_tokens": 50000,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "output_tokens": 9000
+            },
+            "stop_reason": "end_turn",
+            "tool_uses": ["Bash", "Read", "Read", "Grep"],
+            "request_bytes": 220000,
+            "response_bytes": 41000,
+            "message_count": 1,
+            "tools_bytes": 21000
+          }
+        ],
+        "untracked_requests": 2,
+        "untracked_bytes": 4096
+      },
+      "workspace_diff": "",
+      "stderr_tail": "killed: per-task timeout exceeded",
+      "harness_version": "2.0.55",
+      "gantry_sha": "abc1234def",
+      "model": "claude-sonnet-4-5-20250929"
+    },
+    "grade": null
+  },
+  {
+    "run": {
+      "task_id": "targeted-edit",
+      "harness": "gantry",
+      "rep": 1,
+      "outcome": "completed",
+      "wall_ms": 5000,
+      "exit_code": 0,
+      "answer": "Renamed helper and updated both call sites.",
+      "ledger": {
+        "entries": [
+          {
+            "seq": 0,
+            "ts_ms": 1760004000000,
+            "latency_ms": 3000,
+            "model": "claude-sonnet-4-5-20250929",
+            "stream": true,
+            "status": 200,
+            "usage": {
+              "input_tokens": 1000,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "output_tokens": 200
+            },
+            "stop_reason": "end_turn",
+            "tool_uses": ["edit_file"],
+            "request_bytes": 12000,
+            "response_bytes": 1500,
+            "message_count": 1,
+            "tools_bytes": 7400
+          }
+        ],
+        "untracked_requests": 0,
+        "untracked_bytes": 0
+      },
+      "workspace_diff": "diff --git a/src/util.py b/src/util.py\n-def helpr():\n+def helper():\n",
+      "stderr_tail": "",
+      "harness_version": "0.4.0+abc1234",
+      "gantry_sha": "abc1234def",
+      "model": "claude-sonnet-4-5-20250929"
+    },
+    "grade": {
+      "checks": [
+        { "name": "check_command", "pass": true, "detail": "exit 0" }
+      ],
+      "judge_score": null,
+      "judge_rationale": null,
+      "judge_usage": null,
+      "success": true
+    }
+  },
+  {
+    "run": {
+      "task_id": "targeted-edit",
+      "harness": "claude-code",
+      "rep": 1,
+      "outcome": "completed",
+      "wall_ms": 8000,
+      "exit_code": 0,
+      "answer": "Done; helper renamed.",
+      "ledger": {
+        "entries": [
+          {
+            "seq": 0,
+            "ts_ms": 1760005000000,
+            "latency_ms": 5000,
+            "model": "claude-experimental-9000",
+            "stream": true,
+            "status": 200,
+            "usage": {
+              "input_tokens": 2000,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "output_tokens": 400
+            },
+            "stop_reason": "end_turn",
+            "tool_uses": ["Edit"],
+            "request_bytes": 31000,
+            "response_bytes": 2400,
+            "message_count": 1,
+            "tools_bytes": 21000
+          }
+        ],
+        "untracked_requests": 0,
+        "untracked_bytes": 0
+      },
+      "workspace_diff": "diff --git a/src/util.py b/src/util.py\n-def helpr():\n+def helper():\n",
+      "stderr_tail": "",
+      "harness_version": "2.0.55",
+      "gantry_sha": "abc1234def",
+      "model": "claude-experimental-9000"
+    },
+    "grade": {
+      "checks": [
+        { "name": "check_command", "pass": true, "detail": "exit 0" }
+      ],
+      "judge_score": null,
+      "judge_rationale": null,
+      "judge_usage": null,
+      "success": true
+    }
+  }
+]

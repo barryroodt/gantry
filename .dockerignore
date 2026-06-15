@@ -1,0 +1,6 @@
+# Keep the bench image build context small (build from repo root).
+.git
+target
+bench/results
+bench/.cache
+evals/fixtures

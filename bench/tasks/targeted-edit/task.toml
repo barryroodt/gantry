@@ -1,0 +1,26 @@
+# Repo: dtolnay/itoa — MIT OR Apache-2.0, ~490 LOC, zero non-optional deps,
+# extremely stable history. Small enough that the build in check_command is
+# cheap, and the refactor (inline a one-function module) has exactly one
+# call site plus one module declaration, so the edit is fully specified.
+# SHA: release tag 1.0.18 (2026-03-19).
+# Verification, performed by hand against the pinned checkout:
+#   - unmodified tree: check_command exits 1 (src/u128_ext.rs exists).
+#   - after performing the refactor exactly as prompted: check_command
+#     exits 0 and the full `cargo test` suite passes (13 tests, 3 suites).
+# Ground truth for the edit: src/lib.rs:54 `mod u128_ext;`,
+# src/lib.rs:463 `u128_ext::mulhi(n, M_HIGH)`, and src/u128_ext.rs
+# containing the single `pub(crate) fn mulhi`.
+id = "targeted-edit"
+kind = "mutate"
+
+[workspace]
+repo_url = "https://github.com/dtolnay/itoa.git"
+sha = "af77385d0daf4d0e949e81f2588be2e44f69f086"
+
+[grading]
+# Exit 0 requires: module file gone, no lingering references, the function
+# now in lib.rs, and the crate still compiling and passing its tests.
+check_command = "test ! -e src/u128_ext.rs && ! grep -rq u128_ext src && grep -q 'fn mulhi' src/lib.rs && cargo test --quiet"
+# The refactor is confined to src/: manifest, tests, and benches must be
+# untouched.
+diff_must_not_touch = ["Cargo.toml", "tests/**", "benches/**"]
