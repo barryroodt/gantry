@@ -126,6 +126,7 @@ fn test_validated(workdir: &TempDir, prompt_file: &std::path::Path) -> Validated
         max_iterations: 5,
         context_limit: None,
         base_url: None,
+        skills_dir: workdir.path().join(".claude/skills"),
     }
 }
 
@@ -141,7 +142,7 @@ fn build_team(dir: &TempDir, validated: Validated, provider: Arc<dyn ProviderAda
         cancel,
         registry,
         roster,
-        skill_loader: SkillLoader::new(dir.path().to_path_buf()),
+        skill_loader: SkillLoader::new(dir.path().join(".claude/skills")),
         provider,
         prompt: "team review this code".into(),
         spawned_subagents: 0,
@@ -278,7 +279,6 @@ async fn team_mode_uses_supplied_compose_prompt() {
         "compose call did not use the supplied compose prompt: {systems:?}"
     );
 }
-
 // ── G3: --unify-file ─────────────────────────────────────────────────────────
 
 #[tokio::test]
@@ -306,5 +306,103 @@ async fn team_mode_uses_supplied_unify_prompt() {
     assert!(
         systems.iter().any(|s| s.contains("MARKER-UNIFY-PERSONA")),
         "unify call did not use the supplied unify prompt: {systems:?}"
+    );
+}
+
+// ── G4: --skills-dir ─────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn skill_loader_with_custom_root_resolves_from_that_root() {
+    use gantry::emitter::TestEmitterGuard;
+    use gantry::events::GantryEvent;
+
+    let guard = TestEmitterGuard::install();
+    let dir = TempDir::new().unwrap();
+
+    // Create skill at <dir>/foo/SKILL.md — NOT under .claude/skills.
+    let skill_dir = dir.path().join("foo");
+    std::fs::create_dir_all(&skill_dir).unwrap();
+    std::fs::write(skill_dir.join("SKILL.md"), "custom root skill body").unwrap();
+
+    // SkillLoader pointed at dir.path() directly (the custom root).
+    let loader = SkillLoader::new(dir.path().to_path_buf());
+    let names = vec!["foo".to_string()];
+    let prefix = loader.inject_core_skills(&names);
+
+    assert!(
+        prefix.contains("custom root skill body"),
+        "skill body not in prefix: {prefix}"
+    );
+
+    let events = guard.drain_events();
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, GantryEvent::SkillLoaded { name, .. } if name == "foo")),
+        "expected skill_loaded event for 'foo'"
+    );
+}
+
+#[tokio::test]
+async fn skill_load_tool_resolves_from_skills_dir() {
+    use gantry::emitter::TestEmitterGuard;
+
+    let _guard = TestEmitterGuard::install();
+    let dir = TempDir::new().unwrap();
+
+    // Create skill at <dir>/staged/bar/SKILL.md — the override root.
+    let staged = dir.path().join("staged");
+    let skill_dir = staged.join("bar");
+    std::fs::create_dir_all(&skill_dir).unwrap();
+    std::fs::write(skill_dir.join("SKILL.md"), "staged skill content").unwrap();
+
+    // ToolRegistry with the custom skills_dir override.
+    let registry =
+        ToolRegistry::new(dir.path().to_path_buf(), vec![]).with_skills_dir(staged.clone());
+
+    let out = registry
+        .dispatch("coordinator", 1, "skill_load", r#"{"name":"bar"}"#)
+        .await;
+
+    assert!(
+        out.content.contains("staged skill content"),
+        "skill_load did not return staged content: {}",
+        out.content
+    );
+    assert!(
+        !out.content.starts_with("error:"),
+        "unexpected error: {}",
+        out.content
+    );
+}
+
+#[tokio::test]
+async fn skill_load_tool_default_unchanged_when_skills_dir_absent() {
+    use gantry::emitter::TestEmitterGuard;
+
+    let _guard = TestEmitterGuard::install();
+    let dir = TempDir::new().unwrap();
+
+    // Skill at the default location: <workdir>/.claude/skills/myskill/SKILL.md.
+    let default_skill = dir.path().join(".claude/skills/myskill");
+    std::fs::create_dir_all(&default_skill).unwrap();
+    std::fs::write(default_skill.join("SKILL.md"), "default skill content").unwrap();
+
+    // ToolRegistry without .with_skills_dir — defaults to workdir/.claude/skills.
+    let registry = ToolRegistry::new(dir.path().to_path_buf(), vec![]);
+
+    let out = registry
+        .dispatch("coordinator", 1, "skill_load", r#"{"name":"myskill"}"#)
+        .await;
+
+    assert!(
+        out.content.contains("default skill content"),
+        "default skill_load failed: {}",
+        out.content
+    );
+    assert!(
+        !out.content.starts_with("error:"),
+        "unexpected error: {}",
+        out.content
     );
 }

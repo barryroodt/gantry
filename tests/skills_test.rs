@@ -24,7 +24,7 @@ fn resolve_finds_workdir_skill() {
     std::fs::create_dir_all(&skill_dir).unwrap();
     std::fs::write(skill_dir.join("SKILL.md"), "workdir override content").unwrap();
 
-    let loader = SkillLoader::new(dir.path().to_path_buf());
+    let loader = SkillLoader::new(dir.path().join(".claude/skills"));
     let skill = loader.resolve("caveman-review").expect("skill");
     assert_eq!(skill.content, "workdir override content");
 }
@@ -34,21 +34,21 @@ fn resolve_returns_none_without_workdir_copy() {
     // No bundled fallback: an auto-inject-set name absent from the workdir does
     // not resolve. Orchestrators must materialize skills under the workdir.
     let dir = TempDir::new().unwrap();
-    let loader = SkillLoader::new(dir.path().to_path_buf());
+    let loader = SkillLoader::new(dir.path().join(".claude/skills"));
     assert!(loader.resolve("caveman-review").is_none());
 }
 
 #[test]
 fn resolve_returns_none_for_unknown_skill() {
     let dir = TempDir::new().unwrap();
-    let loader = SkillLoader::new(dir.path().to_path_buf());
+    let loader = SkillLoader::new(dir.path().join(".claude/skills"));
     assert!(loader.resolve("not-a-real-skill").is_none());
 }
 
 #[test]
 fn resolve_rejects_path_traversal_name() {
     let dir = TempDir::new().unwrap();
-    let loader = SkillLoader::new(dir.path().to_path_buf());
+    let loader = SkillLoader::new(dir.path().join(".claude/skills"));
     assert!(loader.resolve("../etc").is_none());
 }
 
@@ -66,7 +66,7 @@ fn inject_core_skills_injects_workdir_skills() {
         std::fs::write(skill_dir.join("SKILL.md"), format!("{name} body")).unwrap();
     }
 
-    let loader = SkillLoader::new(dir.path().to_path_buf());
+    let loader = SkillLoader::new(dir.path().join(".claude/skills"));
     let guard = TestEmitterGuard::install();
     let prefix = loader.inject_core_skills(&names);
 
@@ -97,7 +97,7 @@ fn inject_core_skills_skips_absent_skills() {
     // No workdir copies for these names -> empty prefix and no skill_loaded
     // events (each name is warned + skipped).
     let dir = TempDir::new().unwrap();
-    let loader = SkillLoader::new(dir.path().to_path_buf());
+    let loader = SkillLoader::new(dir.path().join(".claude/skills"));
     let guard = TestEmitterGuard::install();
     let names = vec!["absent-skill".to_string(), "also-missing".to_string()];
     let prefix = loader.inject_core_skills(&names);

@@ -29,6 +29,7 @@ fn base_cli(workdir: &Path, prompt_file: &Path) -> Cli {
         subagent_system_file: None,
         compose_file: None,
         unify_file: None,
+        skills_dir: None,
         tools: vec![],
         profile: None,
         isolate: false,
@@ -820,15 +821,28 @@ fn parses_compose_file_flag() {
     let compose = write_prompt_file(&workdir, "compose.md", "CLI COMPOSE BODY");
 
     let validated = Cli::parse_and_validate_from([
-        "gantry", "--mode", "team", "--model", "openai/gpt-4o",
-        "--workdir", workdir.to_str().unwrap(),
-        "--prompt-file", prompt.to_str().unwrap(),
-        "--max-tokens", "8192", "--timeout-ms", "60000",
-        "--compose-file", compose.to_str().unwrap(),
+        "gantry",
+        "--mode",
+        "team",
+        "--model",
+        "openai/gpt-4o",
+        "--workdir",
+        workdir.to_str().unwrap(),
+        "--prompt-file",
+        prompt.to_str().unwrap(),
+        "--max-tokens",
+        "8192",
+        "--timeout-ms",
+        "60000",
+        "--compose-file",
+        compose.to_str().unwrap(),
     ])
     .expect("parse_and_validate");
 
-    assert_eq!(validated.compose_prompt.as_deref(), Some("CLI COMPOSE BODY"));
+    assert_eq!(
+        validated.compose_prompt.as_deref(),
+        Some("CLI COMPOSE BODY")
+    );
     assert!(validated.unify_prompt.is_none());
 }
 
@@ -839,11 +853,21 @@ fn parses_unify_file_flag() {
     let unify = write_prompt_file(&workdir, "unify.md", "CLI UNIFY BODY");
 
     let validated = Cli::parse_and_validate_from([
-        "gantry", "--mode", "team", "--model", "openai/gpt-4o",
-        "--workdir", workdir.to_str().unwrap(),
-        "--prompt-file", prompt.to_str().unwrap(),
-        "--max-tokens", "8192", "--timeout-ms", "60000",
-        "--unify-file", unify.to_str().unwrap(),
+        "gantry",
+        "--mode",
+        "team",
+        "--model",
+        "openai/gpt-4o",
+        "--workdir",
+        workdir.to_str().unwrap(),
+        "--prompt-file",
+        prompt.to_str().unwrap(),
+        "--max-tokens",
+        "8192",
+        "--timeout-ms",
+        "60000",
+        "--unify-file",
+        unify.to_str().unwrap(),
     ])
     .expect("parse_and_validate");
 
@@ -857,20 +881,36 @@ fn compose_file_overrides_profile() {
     let prompt = write_prompt_file(&workdir, "prompt.txt", "hello");
     let override_file = write_prompt_file(&workdir, "cli-compose.md", "CLI COMPOSE OVERRIDE");
     let profile_dir = workdir.join("prof");
-    write_profile(&profile_dir, "mode = \"team\"\ncompose = \"compose.md\"\n", &[("compose.md", "PROFILE COMPOSE")]);
+    write_profile(
+        &profile_dir,
+        "mode = \"team\"\ncompose = \"compose.md\"\n",
+        &[("compose.md", "PROFILE COMPOSE")],
+    );
 
     let validated = Cli::parse_and_validate_from([
-        "gantry", "--model", "openai/gpt-4o",
-        "--workdir", workdir.to_str().unwrap(),
-        "--prompt-file", prompt.to_str().unwrap(),
-        "--max-tokens", "8192", "--timeout-ms", "60000",
-        "--profile", profile_dir.to_str().unwrap(),
-        "--compose-file", override_file.to_str().unwrap(),
+        "gantry",
+        "--model",
+        "openai/gpt-4o",
+        "--workdir",
+        workdir.to_str().unwrap(),
+        "--prompt-file",
+        prompt.to_str().unwrap(),
+        "--max-tokens",
+        "8192",
+        "--timeout-ms",
+        "60000",
+        "--profile",
+        profile_dir.to_str().unwrap(),
+        "--compose-file",
+        override_file.to_str().unwrap(),
     ])
     .expect("parse_and_validate");
 
-    assert_eq!(validated.compose_prompt.as_deref(), Some("CLI COMPOSE OVERRIDE"),
-        "CLI --compose-file must override profile compose");
+    assert_eq!(
+        validated.compose_prompt.as_deref(),
+        Some("CLI COMPOSE OVERRIDE"),
+        "CLI --compose-file must override profile compose"
+    );
 }
 
 #[test]
@@ -879,20 +919,36 @@ fn unify_file_overrides_profile() {
     let prompt = write_prompt_file(&workdir, "prompt.txt", "hello");
     let override_file = write_prompt_file(&workdir, "cli-unify.md", "CLI UNIFY OVERRIDE");
     let profile_dir = workdir.join("prof");
-    write_profile(&profile_dir, "mode = \"team\"\nunify = \"unify.md\"\n", &[("unify.md", "PROFILE UNIFY")]);
+    write_profile(
+        &profile_dir,
+        "mode = \"team\"\nunify = \"unify.md\"\n",
+        &[("unify.md", "PROFILE UNIFY")],
+    );
 
     let validated = Cli::parse_and_validate_from([
-        "gantry", "--model", "openai/gpt-4o",
-        "--workdir", workdir.to_str().unwrap(),
-        "--prompt-file", prompt.to_str().unwrap(),
-        "--max-tokens", "8192", "--timeout-ms", "60000",
-        "--profile", profile_dir.to_str().unwrap(),
-        "--unify-file", override_file.to_str().unwrap(),
+        "gantry",
+        "--model",
+        "openai/gpt-4o",
+        "--workdir",
+        workdir.to_str().unwrap(),
+        "--prompt-file",
+        prompt.to_str().unwrap(),
+        "--max-tokens",
+        "8192",
+        "--timeout-ms",
+        "60000",
+        "--profile",
+        profile_dir.to_str().unwrap(),
+        "--unify-file",
+        override_file.to_str().unwrap(),
     ])
     .expect("parse_and_validate");
 
-    assert_eq!(validated.unify_prompt.as_deref(), Some("CLI UNIFY OVERRIDE"),
-        "CLI --unify-file must override profile unify");
+    assert_eq!(
+        validated.unify_prompt.as_deref(),
+        Some("CLI UNIFY OVERRIDE"),
+        "CLI --unify-file must override profile unify"
+    );
 }
 
 #[test]
@@ -900,19 +956,34 @@ fn profile_compose_used_when_compose_file_absent() {
     let workdir = temp_workdir("profile-compose-fallback");
     let prompt = write_prompt_file(&workdir, "prompt.txt", "hello");
     let profile_dir = workdir.join("prof");
-    write_profile(&profile_dir, "mode = \"team\"\ncompose = \"compose.md\"\n", &[("compose.md", "PROFILE COMPOSE")]);
+    write_profile(
+        &profile_dir,
+        "mode = \"team\"\ncompose = \"compose.md\"\n",
+        &[("compose.md", "PROFILE COMPOSE")],
+    );
 
     let validated = Cli::parse_and_validate_from([
-        "gantry", "--model", "openai/gpt-4o",
-        "--workdir", workdir.to_str().unwrap(),
-        "--prompt-file", prompt.to_str().unwrap(),
-        "--max-tokens", "8192", "--timeout-ms", "60000",
-        "--profile", profile_dir.to_str().unwrap(),
+        "gantry",
+        "--model",
+        "openai/gpt-4o",
+        "--workdir",
+        workdir.to_str().unwrap(),
+        "--prompt-file",
+        prompt.to_str().unwrap(),
+        "--max-tokens",
+        "8192",
+        "--timeout-ms",
+        "60000",
+        "--profile",
+        profile_dir.to_str().unwrap(),
     ])
     .expect("parse_and_validate");
 
-    assert_eq!(validated.compose_prompt.as_deref(), Some("PROFILE COMPOSE"),
-        "profile compose must be used when --compose-file is absent");
+    assert_eq!(
+        validated.compose_prompt.as_deref(),
+        Some("PROFILE COMPOSE"),
+        "profile compose must be used when --compose-file is absent"
+    );
 }
 
 #[test]
@@ -920,19 +991,34 @@ fn profile_unify_used_when_unify_file_absent() {
     let workdir = temp_workdir("profile-unify-fallback");
     let prompt = write_prompt_file(&workdir, "prompt.txt", "hello");
     let profile_dir = workdir.join("prof");
-    write_profile(&profile_dir, "mode = \"team\"\nunify = \"unify.md\"\n", &[("unify.md", "PROFILE UNIFY")]);
+    write_profile(
+        &profile_dir,
+        "mode = \"team\"\nunify = \"unify.md\"\n",
+        &[("unify.md", "PROFILE UNIFY")],
+    );
 
     let validated = Cli::parse_and_validate_from([
-        "gantry", "--model", "openai/gpt-4o",
-        "--workdir", workdir.to_str().unwrap(),
-        "--prompt-file", prompt.to_str().unwrap(),
-        "--max-tokens", "8192", "--timeout-ms", "60000",
-        "--profile", profile_dir.to_str().unwrap(),
+        "gantry",
+        "--model",
+        "openai/gpt-4o",
+        "--workdir",
+        workdir.to_str().unwrap(),
+        "--prompt-file",
+        prompt.to_str().unwrap(),
+        "--max-tokens",
+        "8192",
+        "--timeout-ms",
+        "60000",
+        "--profile",
+        profile_dir.to_str().unwrap(),
     ])
     .expect("parse_and_validate");
 
-    assert_eq!(validated.unify_prompt.as_deref(), Some("PROFILE UNIFY"),
-        "profile unify must be used when --unify-file is absent");
+    assert_eq!(
+        validated.unify_prompt.as_deref(),
+        Some("PROFILE UNIFY"),
+        "profile unify must be used when --unify-file is absent"
+    );
 }
 
 #[test]
@@ -940,14 +1026,27 @@ fn missing_compose_file_returns_config_error() {
     let workdir = temp_workdir("compose-missing");
     let prompt = write_prompt_file(&workdir, "prompt.txt", "hello");
     let err = Cli::parse_and_validate_from([
-        "gantry", "--mode", "team", "--model", "openai/gpt-4o",
-        "--workdir", workdir.to_str().unwrap(),
-        "--prompt-file", prompt.to_str().unwrap(),
-        "--max-tokens", "8192", "--timeout-ms", "60000",
-        "--compose-file", "/nonexistent/compose.md",
+        "gantry",
+        "--mode",
+        "team",
+        "--model",
+        "openai/gpt-4o",
+        "--workdir",
+        workdir.to_str().unwrap(),
+        "--prompt-file",
+        prompt.to_str().unwrap(),
+        "--max-tokens",
+        "8192",
+        "--timeout-ms",
+        "60000",
+        "--compose-file",
+        "/nonexistent/compose.md",
     ])
     .unwrap_err();
-    assert!(matches!(err, ConfigError::SystemFileMissing(_)), "got {err:?}");
+    assert!(
+        matches!(err, ConfigError::SystemFileMissing(_)),
+        "got {err:?}"
+    );
 }
 
 #[test]
@@ -955,12 +1054,86 @@ fn missing_unify_file_returns_config_error() {
     let workdir = temp_workdir("unify-missing");
     let prompt = write_prompt_file(&workdir, "prompt.txt", "hello");
     let err = Cli::parse_and_validate_from([
-        "gantry", "--mode", "team", "--model", "openai/gpt-4o",
-        "--workdir", workdir.to_str().unwrap(),
-        "--prompt-file", prompt.to_str().unwrap(),
-        "--max-tokens", "8192", "--timeout-ms", "60000",
-        "--unify-file", "/nonexistent/unify.md",
+        "gantry",
+        "--mode",
+        "team",
+        "--model",
+        "openai/gpt-4o",
+        "--workdir",
+        workdir.to_str().unwrap(),
+        "--prompt-file",
+        prompt.to_str().unwrap(),
+        "--max-tokens",
+        "8192",
+        "--timeout-ms",
+        "60000",
+        "--unify-file",
+        "/nonexistent/unify.md",
     ])
     .unwrap_err();
-    assert!(matches!(err, ConfigError::SystemFileMissing(_)), "got {err:?}");
+    assert!(
+        matches!(err, ConfigError::SystemFileMissing(_)),
+        "got {err:?}"
+    );
+}
+
+// ── G4: --skills-dir ─────────────────────────────────────────────────────────
+
+#[test]
+fn skills_dir_flag_sets_validated_skills_dir() {
+    let workdir = temp_workdir("skills-dir-flag");
+    let prompt = write_prompt_file(&workdir, "prompt.txt", "hello");
+    // Use the workdir itself as an arbitrary skills root (it exists).
+    let skills_root = workdir.clone();
+
+    let validated = Cli::parse_and_validate_from([
+        "gantry",
+        "--mode",
+        "single",
+        "--model",
+        "openai/gpt-4o",
+        "--workdir",
+        workdir.to_str().unwrap(),
+        "--prompt-file",
+        prompt.to_str().unwrap(),
+        "--max-tokens",
+        "8192",
+        "--timeout-ms",
+        "60000",
+        "--skills-dir",
+        skills_root.to_str().unwrap(),
+    ])
+    .expect("parse_and_validate");
+
+    // `skills_dir` is not canonicalized when set via flag (trusted config, like --profile).
+    assert_eq!(validated.skills_dir, skills_root);
+}
+
+#[test]
+fn skills_dir_defaults_to_workdir_claude_skills() {
+    let workdir = temp_workdir("skills-dir-default");
+    let prompt = write_prompt_file(&workdir, "prompt.txt", "hello");
+
+    let validated = Cli::parse_and_validate_from([
+        "gantry",
+        "--mode",
+        "single",
+        "--model",
+        "openai/gpt-4o",
+        "--workdir",
+        workdir.to_str().unwrap(),
+        "--prompt-file",
+        prompt.to_str().unwrap(),
+        "--max-tokens",
+        "8192",
+        "--timeout-ms",
+        "60000",
+    ])
+    .expect("parse_and_validate");
+
+    assert_eq!(
+        validated.skills_dir,
+        workdir.canonicalize().unwrap().join(".claude/skills"),
+        "default skills_dir must be <workdir>/.claude/skills"
+    );
 }

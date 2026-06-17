@@ -15,7 +15,7 @@ async fn skill_load_happy_path() {
     write_skill(workdir, "specialist", "specialist body");
 
     let out = skill_load(
-        workdir,
+        &workdir.join(".claude/skills"),
         SkillLoadArgs {
             name: "specialist".into(),
         },
@@ -36,7 +36,7 @@ async fn skill_load_missing_skill() {
     let workdir = dir.path();
 
     let err = skill_load(
-        workdir,
+        &workdir.join(".claude/skills"),
         SkillLoadArgs {
             name: "missing-skill".into(),
         },
@@ -56,7 +56,7 @@ async fn skill_load_rejects_invalid_name() {
     let workdir = dir.path();
 
     let err = skill_load(
-        workdir,
+        &workdir.join(".claude/skills"),
         SkillLoadArgs {
             name: "../etc".into(),
         },
@@ -91,7 +91,7 @@ async fn skill_load_rejects_symlink_escape() {
     }
 
     let err = skill_load(
-        workdir,
+        &workdir.join(".claude/skills"),
         SkillLoadArgs {
             name: "escape".into(),
         },
@@ -108,7 +108,7 @@ async fn skill_load_no_bundled_fallback() {
     let workdir = dir.path();
 
     let err = skill_load(
-        workdir,
+        &workdir.join(".claude/skills"),
         SkillLoadArgs {
             name: "caveman-review".into(),
         },

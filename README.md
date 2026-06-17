@@ -73,7 +73,8 @@ Each line of stdout is one JSON event; the final `result` event carries the exit
 | `--compose-file <path>` | no | Compose-phase system prompt (team mode). Overrides the profile's `compose` file. Silently ignored outside team mode. |
 | `--unify-file <path>` | no | Unify-phase system prompt (team mode). Overrides the profile's `unify` file. Silently ignored outside team mode. |
 | `--tool <name>` | no | Restrict the exposed tools (repeatable). Default: all base tools for the mode. |
-| `--inject-skill <name>` | no | Inject `<workdir>/.claude/skills/<name>/SKILL.md` into the system prompt (repeatable). |
+| `--inject-skill <name>` | no | Inject `<skills-dir>/<name>/SKILL.md` into the system prompt (repeatable). Skills dir defaults to `<workdir>/.claude/skills`; override with `--skills-dir`. |
+| `--skills-dir <dir>` | no | Root directory for skill resolution (both `--inject-skill` and the `skill_load` tool). Defaults to `<workdir>/.claude/skills`. Trusted config — not workdir-confined. |
 | `--isolate` | no | Run against a copy-on-write shadow of the workdir (see [Isolation](#isolation)). |
 | `--max-iterations <n>` | no | Iteration cap for `--mode loop` (default 5, min 1). |
 | `--base-url <URL>` | no | OpenAI-compatible endpoint for the `local` provider (e.g. `http://localhost:8000/v1`). Overrides `GANTRY_LOCAL_BASE_URL`. Rejected for non-local providers. |
@@ -120,7 +121,7 @@ Tools are workdir-confined. The exposed set is controlled by `--tool` / a profil
 | `git_diff` | base | Run `git diff` in the workdir. |
 | `ast_grep` | base | Structural (AST) code search → match locations. |
 | `shell` | base | Run a `bash` command — **only allowlisted programs** may be invoked (`shell_allow`). |
-| `skill_load` | base | Load a skill from `<workdir>/.claude/skills`. |
+| `skill_load` | base | Load a skill from the skills root (`<workdir>/.claude/skills` by default; override with `--skills-dir`). |
 | `write_file` | opt-in | Create or overwrite a workdir file. **Mutating.** |
 | `edit_file` | opt-in | Literal, occurrence-count-guarded search/replace. **Mutating.** |
 | `ast_edit` | opt-in | Structural (AST) rewrite across files. **Mutating.** |

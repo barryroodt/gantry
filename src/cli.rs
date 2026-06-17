@@ -53,6 +53,13 @@ pub struct Cli {
     #[arg(long = "unify-file", value_name = "PATH")]
     pub unify_file: Option<PathBuf>,
 
+    /// Root directory for skill resolution (both `--inject-skill` and the
+    /// `skill_load` tool). Defaults to `<workdir>/.claude/skills`. Trusted
+    /// config — not workdir-confined — but skill names within it still receive
+    /// the lexical `..` / symlink guard.
+    #[arg(long = "skills-dir", value_name = "DIR")]
+    pub skills_dir: Option<PathBuf>,
+
     /// Restrict the tools exposed to the agent (repeatable). Default: all tools
     /// available for the selected mode. Each name must be valid for the mode.
     #[arg(long = "tool", value_name = "NAME")]
@@ -216,6 +223,7 @@ pub struct Validated {
     pub max_iterations: u32,
     pub context_limit: Option<u64>,
     pub base_url: Option<String>,
+    pub skills_dir: PathBuf,
 }
 
 impl Cli {
@@ -282,6 +290,9 @@ impl Cli {
             Some(s) => Some(s),
             None => profile.as_ref().and_then(|p| p.unify_prompt.clone()),
         };
+        let skills_dir = self
+            .skills_dir
+            .unwrap_or_else(|| workdir.join(".claude/skills"));
 
         let available = crate::tools::registry::available_tool_names();
         let tools = if self.tools.is_empty() {
@@ -350,6 +361,7 @@ impl Cli {
             max_iterations,
             context_limit: self.context_limit,
             base_url: self.base_url,
+            skills_dir,
         })
     }
 

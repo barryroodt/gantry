@@ -237,7 +237,8 @@ pub async fn run_single(validated: Validated) -> ModeRunOutcome {
         Err(o) => return o,
     };
     let registry = ToolRegistry::new(validated.workdir.clone(), validated.tools.clone())
-        .with_shell_allow(validated.shell_allow.clone());
+        .with_shell_allow(validated.shell_allow.clone())
+        .with_skills_dir(validated.skills_dir.clone());
     let exit = SingleMode {
         validated,
         meter: meter.clone(),
