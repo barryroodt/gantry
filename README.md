@@ -45,6 +45,8 @@ Pushing a `v*` tag publishes a GitHub release with prebuilt Linux binaries, each
 - `gantry-<tag>-aarch64-unknown-linux-gnu.tar.gz`
 - `SHA256SUMS` — coreutils `sha256sum` format, covering both tarballs
 
+The `*-unknown-linux-gnu` binaries are built on **Ubuntu 22.04** and require **glibc ≥ 2.35** — they run on Debian 12 (bookworm, including `node:22-slim`), Ubuntu 22.04+, and newer. The build host's glibc sets this floor, so the release workflow runs a **portability smoke** (the freshly built binary must emit its `start` event under `debian:bookworm-slim`, glibc 2.36) before publishing — the floor can't silently rise.
+
 **Pinned artifact contract** (consumers depend on this; it will not change without a MAJOR bump): each tarball contains exactly one member, `gantry`, at the archive root — flat, no directory prefix. Verify and extract a pinned binary with:
 
 ```bash
@@ -236,6 +238,8 @@ The `result.exit` value maps to the process exit code:
 | `timeout` | 3 | Wall-clock timeout (or SIGINT/SIGTERM). |
 | `config` | 4 | Invalid configuration (bad flags, missing prompt, unknown provider). |
 | `rate_limited` | 5 | Provider rate-limited after retries — back off (honor `error.retry_after_ms` when present) and retry the run. |
+
+> `--help` and `--version` exit `config` (4), **not** 0 — clap's help/version paths are captured as a config error because gantry is a non-interactive NDJSON sidecar with no human help path. Don't write a `--help`/`--version` liveness probe; invoke with real args and assert the `start` event instead.
 
 ### Contract versioning
 

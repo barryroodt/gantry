@@ -23,12 +23,18 @@ jobs:
       matrix:
         # Native build per arch (no cross-compilation): the dependency tree pulls
         # aws-lc-sys / ring, which are painful to cross-compile but build cleanly
-        # on a native runner. Public repos get free `ubuntu-24.04-arm` runners.
+        # on a native runner. Public repos get free arm64 runners.
+        #
+        # The build-host OS is pinned to Ubuntu 22.04 (glibc 2.35) ON PURPOSE:
+        # cargo links against the builder's glibc, so the runner OS sets the
+        # binary's minimum-glibc floor. 2.35 runs on Debian 12 bookworm (2.36,
+        # == node:22-slim), Ubuntu 22.04+, etc. Building on 24.04 (2.39) stamped a
+        # too-high floor and broke slim consumer images (see ADR-0015 glibc floor).
         include:
           - target: x86_64-unknown-linux-gnu
-            runner: ubuntu-latest
+            runner: ubuntu-22.04
           - target: aarch64-unknown-linux-gnu
-            runner: ubuntu-24.04-arm
+            runner: ubuntu-22.04-arm
     steps:
       # Actions are pinned to commit SHAs (not mutable tags) so a moved/compromised
       # tag cannot inject code into CI; the trailing comment tracks the version for
@@ -73,6 +79,26 @@ jobs:
           # member, `gantry`, at the archive root.
           test "$(tar -tzf "$asset")" = "gantry"
           echo "ASSET=$asset" >> "$GITHUB_ENV"
+
+      # Portability smoke: prove the freshly built binary actually loads and runs
+      # on the LOWEST supported glibc before it can be published. A GLIBC version
+      # mismatch aborts in the dynamic loader *before any output*, so asserting the
+      # `start` NDJSON event proves the binary loaded. debian:bookworm-slim (glibc
+      # 2.36) mirrors node:22-slim, the consumer base. NOTE: NOT `gantry --help` —
+      # that exits `config` (4) by design (clap help/version are captured as a
+      # ConfigError; gantry is a non-interactive NDJSON sidecar with no exit-0 help
+      # path). The provider error from the unreachable endpoint is irrelevant here.
+      - name: Smoke (binary loads + emits NDJSON on glibc 2.36)
+        run: |
+          docker run --rm -e ASSET="$ASSET" -v "$PWD:/w" debian:bookworm-slim sh -c '
+            set -e
+            tar -xzf "/w/$ASSET" -C /tmp
+            printf "noop" > /tmp/p.txt
+            out=$(/tmp/gantry --mode single --model local/dummy \
+                  --base-url http://127.0.0.1:9/v1 --workdir /tmp \
+                  --prompt-file /tmp/p.txt --max-tokens 16 --timeout-ms 1500 2>&1 || true)
+            printf "%s\n" "$out" | grep -q "\"event\":\"start\"" && echo SMOKE_OK
+          '
 
       - name: Upload build artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

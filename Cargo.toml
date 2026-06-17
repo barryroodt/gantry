@@ -11,7 +11,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [package]
 name = "gantry"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 rust-version = "1.96"
 description = "A standalone, headless LLM agent harness driven over the CLI with a structured NDJSON event stream — single, team, and iterative-loop modes, sandboxed tools, and optional copy-on-write workspace isolation."
