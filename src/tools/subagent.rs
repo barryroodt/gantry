@@ -93,6 +93,7 @@ impl SubagentRoster {
         registry: Arc<ToolRegistry>,
         system_template: String,
         meter: Arc<TokenMeter>,
+        budget_slice: u64,
     ) -> Result<String, String> {
         let (msg_tx, mut msg_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
         let (find_tx, find_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
@@ -126,6 +127,7 @@ impl SubagentRoster {
             let mut round: u32 = 0;
             let mut input_tokens: u64 = 0;
             let mut output_tokens: u64 = 0;
+            let mut subagent_consumed: u64 = 0;
             let mut stop = false;
 
             'rounds: loop {
@@ -180,6 +182,19 @@ impl SubagentRoster {
                         .is_err()
                     {
                         stop = true;
+                    }
+
+                    // G6: per-subagent slice enforcement (G7 formula: input + output + cache_write).
+                    // Does not cancel the global token — the run continues with other subagents.
+                    subagent_consumed += resp.input_tokens + resp.output_tokens + resp.cache_write;
+                    if subagent_consumed > budget_slice {
+                        let _ = GantryEvent::SubagentFailed {
+                            ts: now_ms(),
+                            name: subagent_name.clone(),
+                            reason: "budget".into(),
+                        }
+                        .emit();
+                        break 'rounds;
                     }
 
                     if resp.tool_calls.is_empty() {

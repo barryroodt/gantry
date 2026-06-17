@@ -137,7 +137,10 @@ fn total_formula_is_input_plus_output_plus_cache_write_not_cache_read() {
     let meter = TokenMeter::new(100, cancel.clone());
 
     // 30+30+10=70 (cache_read=50 not counted) — should succeed.
-    assert!(meter.add(30, 30, 50, 10).is_ok(), "70 < 100; cache_read must not count");
+    assert!(
+        meter.add(30, 30, 50, 10).is_ok(),
+        "70 < 100; cache_read must not count"
+    );
     assert!(guard.drain_events().is_empty());
 
     // +30 → 100 exactly; at-cap means exceeded (total >= limit).
@@ -147,7 +150,14 @@ fn total_formula_is_input_plus_output_plus_cache_write_not_cache_read() {
     let ev = guard.drain_events();
     assert_eq!(ev.len(), 1);
     assert!(
-        matches!(ev[0], GantryEvent::BudgetExceeded { limit: 100, total: 100, .. }),
+        matches!(
+            ev[0],
+            GantryEvent::BudgetExceeded {
+                limit: 100,
+                total: 100,
+                ..
+            }
+        ),
         "unexpected event: {:?}",
         ev[0]
     );

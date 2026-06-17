@@ -122,6 +122,7 @@ async fn spawn_subagent(
             registry.clone(),
             "subagent system".into(),
             meter.clone(),
+            u64::MAX, // unlimited slice — subagent tests don't exercise slice enforcement
         )
         .await
         .expect("spawn_subagent")

@@ -53,7 +53,16 @@ impl TeamMode {
             return self.collapse("compose produced no subagents");
         }
 
-        // 2. Spawn one subagent per plan entry.
+        // 2. Compute per-subagent budget slice (G6): remaining global budget after
+        //    compose, divided evenly across the N spawned subagents. Uses the G7
+        //    formula (input + output + cache_write). A slice of 0 means the budget
+        //    is already exhausted — every subagent will fail immediately on its
+        //    first response.
+        // plan is non-empty (empty → early return above), so n ≥ 1 and the division is safe.
+        let n = plan.len() as u64;
+        let slice = self.meter.remaining() / n;
+
+        // 3. Spawn one subagent per plan entry, each carrying its budget slice.
         let subagent_template = self
             .validated
             .subagent_system_prompt
@@ -73,6 +82,7 @@ impl TeamMode {
                     self.registry.clone(),
                     subagent_template.clone(),
                     self.meter.clone(),
+                    slice,
                 )
                 .await;
             self.spawned_subagents += 1;
