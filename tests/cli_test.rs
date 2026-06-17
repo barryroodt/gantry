@@ -47,7 +47,7 @@ fn parse_slug_routes_each_provider() {
         ("openai/gpt-4o", Provider::OpenAi, "gpt-4o"),
         ("openai/o3-mini", Provider::OpenAi, "o3-mini"),
         (
-            "gemini/gemini-2.0-flash",
+            "google/gemini-2.0-flash",
             Provider::Gemini,
             "gemini-2.0-flash",
         ),
@@ -98,6 +98,13 @@ fn parse_slug_unknown_provider_rejected() {
         parse_model_slug("cursor/composer-2.5"),
         Err(ConfigError::UnknownProvider {
             provider: "cursor".into(),
+        })
+    );
+    // G2: gemini/ was renamed to google/ — the old slug is now unknown.
+    assert_eq!(
+        parse_model_slug("gemini/gemini-2.5-pro"),
+        Err(ConfigError::UnknownProvider {
+            provider: "gemini".into(),
         })
     );
 }

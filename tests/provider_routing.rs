@@ -87,6 +87,37 @@ impl Drop for EnvVarGuard {
 }
 
 #[test]
+fn provider_gemini_as_str_is_google() {
+    // G2: Provider::Gemini.as_str() must return "google" after the slug rename.
+    assert_eq!(Provider::Gemini.as_str(), "google");
+}
+
+#[test]
+fn google_slug_routes_to_gemini_adapter() {
+    // G2: `google/<model>` must dispatch to the Gemini adapter.
+    let (provider, model) = parse_model_slug("google/gemini-2.5-pro").expect("google slug parses");
+    assert_eq!(provider, Provider::Gemini);
+    assert_eq!(model, "gemini-2.5-pro");
+}
+
+#[test]
+fn gemini_slug_is_now_unknown_provider() {
+    // G2: `gemini/` is no longer a valid slug prefix → config error.
+    assert_eq!(
+        parse_model_slug("gemini/gemini-2.0-flash"),
+        Err(ConfigError::UnknownProvider {
+            provider: "gemini".into(),
+        })
+    );
+    assert_eq!(
+        parse_model_slug("gemini/gemini-1.5-pro"),
+        Err(ConfigError::UnknownProvider {
+            provider: "gemini".into(),
+        })
+    );
+}
+
+#[test]
 fn parse_slug_routes_provider_table() {
     let cases = [
         ("anthropic/claude-3-5-sonnet-latest", Provider::Anthropic),
@@ -95,8 +126,8 @@ fn parse_slug_routes_provider_table() {
         ("openai/gpt-4o-mini", Provider::OpenAi),
         ("openai/o1", Provider::OpenAi),
         ("openai/o3-mini", Provider::OpenAi),
-        ("gemini/gemini-2.0-flash", Provider::Gemini),
-        ("gemini/gemini-1.5-pro", Provider::Gemini),
+        ("google/gemini-2.0-flash", Provider::Gemini),
+        ("google/gemini-1.5-pro", Provider::Gemini),
         ("local/qwen3-coder-next", Provider::Local),
         ("local/llama-3.3-70b", Provider::Local),
     ];
