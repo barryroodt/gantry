@@ -64,7 +64,7 @@ Each line of stdout is one JSON event; the final `result` event carries the exit
 | `--model <provider/model>` | yes | Provider slug + model id, e.g. `anthropic/claude-opus-4-8`, `openai/gpt-4o`, `google/gemini-2.5-pro`, `local/qwen3-coder-next`. |
 | `--workdir <dir>` | yes | Working directory; all file tools are confined to it. |
 | `--prompt-file <path>` | yes | The user prompt, read from a file. |
-| `--max-tokens <n>` | yes | Hard token budget; the run stops with exit `budget` if exceeded. |
+| `--max-tokens <n>` | yes | Hard token budget (formula: `input + output + cache_write`; cache_read excluded). The run stops with exit `budget` if the running total meets or exceeds this value. |
 | `--timeout-ms <n>` | yes | Wall-clock timeout; the run stops with exit `timeout`. |
 | `--mode <single\|team\|loop>` | no¹ | Execution mode. ¹Optional when a `--profile` supplies one. |
 | `--profile <dir>` | no | Load a profile directory (see [Profiles](#profiles)). Explicit flags override profile values. |
@@ -176,10 +176,10 @@ Gantry emits one JSON object per line to **stdout**, each tagged with an `"event
 | `assistant_text` | model text output | `role`, `text` |
 | `subagent_spawn` | team subagent starts | `name`, `scope` |
 | `subagent_done` | team subagent finishes | `name`, `turns`, `input_tokens`, `output_tokens` |
-| `subagent_failed` | team subagent errors | `name`, `reason` |
+| `subagent_failed` | team subagent errors | `name`, `reason` — vocabulary: `budget` (slice exceeded), `panic` (subagent task panicked), otherwise free-form provider error text |
 | `iteration_start` / `iteration_end` | loop iteration boundaries | `iteration`, `stopped` |
 | `history_compacted` | transcript compaction ran | `role`, `turn`, `results_elided`, `input_tokens` |
-| `budget_exceeded` | token budget tripped | `limit`, `total` |
+| `budget_exceeded` | global token cap tripped (emitted at most once per run; `total = input + output + cache_write`) | `limit`, `total` |
 | `changes` | `--isolate` teardown | `files: [{path, kind}]` |
 | `error` | recoverable/terminal error | `kind` (`config`/`provider`/`team_collapse`/`internal`), `message`, `recoverable`, `retry_after_ms?` |
 | `result` | terminal (always last) | `exit`, `total_input`, `total_output`, `total_cache_read`, `total_cache_write`, `duration_ms` |

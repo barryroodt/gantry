@@ -406,3 +406,132 @@ async fn skill_load_tool_default_unchanged_when_skills_dir_absent() {
         out.content
     );
 }
+
+/// Provider that returns configurable token counts per role, used to exercise
+/// per-subagent budget slices (G6).
+struct SliceTestProvider {
+    /// Tokens (input+output) to return for a subagent with this role. Roles not
+    /// in the map return 1+1 by default.
+    role_tokens: std::collections::HashMap<String, u64>,
+}
+
+impl SliceTestProvider {
+    fn new(role_tokens: &[(&str, u64)]) -> Self {
+        Self {
+            role_tokens: role_tokens
+                .iter()
+                .map(|(r, t)| ((*r).to_string(), *t))
+                .collect(),
+        }
+    }
+}
+
+#[async_trait]
+impl ProviderAdapter for SliceTestProvider {
+    fn provider(&self) -> gantry::cli::Provider {
+        gantry::cli::Provider::OpenAi
+    }
+    fn model(&self) -> &str {
+        "gpt-slice-test"
+    }
+    async fn complete(
+        &self,
+        _system: &str,
+        messages: &[ChatMessage],
+        _tools: &[ToolSchema],
+    ) -> anyhow::Result<ProviderResponse> {
+        // Subagent turn: first user line is "Role: <role>".
+        for m in messages {
+            if let ChatMessage::User(text) = m {
+                if let Some(role) = text.lines().next().and_then(|l| l.strip_prefix("Role: ")) {
+                    let tokens = self.role_tokens.get(role).copied().unwrap_or(1);
+                    return Ok(ProviderResponse {
+                        text: format!("{role} report"),
+                        tool_calls: vec![],
+                        input_tokens: tokens,
+                        output_tokens: 1,
+                        cache_read: 0,
+                        cache_write: 0,
+                    });
+                }
+            }
+        }
+        // Unify: contains "# Subagent reports".
+        let is_unify = messages
+            .iter()
+            .any(|m| matches!(m, ChatMessage::User(t) if t.contains("# Subagent reports")));
+        if is_unify {
+            Ok(respond(
+                r#"{"summary":"ok","verdict":"ok","findings":[],"strengths":[]}"#,
+            ))
+        } else {
+            // Compose: spawn heavy + light.
+            Ok(respond(
+                r#"{"subagents":[{"name":"heavy","role":"heavy","scope":"full"},{"name":"light","role":"light","scope":"full"}]}"#,
+            ))
+        }
+    }
+}
+
+/// A subagent whose slice is exceeded must emit `subagent_failed(reason=budget)`
+/// and the run must still reach exit `ok` (dropped-lane semantics) because the
+/// other subagent completes within its slice and the global cap is not hit.
+#[tokio::test]
+async fn team_mode_subagent_slice_exceeded_emits_failed_reason_budget() {
+    let guard = TestEmitterGuard::install();
+    let dir = TempDir::new().unwrap();
+
+    // heavy uses 5001 tokens (input=5000, output=1); light uses 2 (input=1, output=1).
+    // max_tokens=10_000; compose uses 2 → remaining=9998; slice=9998/2=4999.
+    // heavy consumes 5001 > 4999 → slice exceeded → subagent_failed(reason=budget).
+    // light consumes 2 ≤ 4999 → completes.
+    // global total ≈ 2+5001+2+2 = 5007 < 10_000 → no global trip → exit ok.
+    let provider = Arc::new(SliceTestProvider::new(&[("heavy", 5000), ("light", 1)]));
+    let exit = run_team_mode(&dir, provider, 10_000).await;
+    assert_eq!(exit, ExitCode::Ok, "run must still exit ok");
+
+    let events = guard.drain_events();
+
+    let failed_budget = events.iter().any(|e| {
+        matches!(
+            e,
+            GantryEvent::SubagentFailed { name, reason, .. }
+            if name == "heavy" && reason == "budget"
+        )
+    });
+    assert!(
+        failed_budget,
+        "expected subagent_failed(name=heavy, reason=budget)"
+    );
+
+    // Global budget_exceeded must NOT have been emitted.
+    let global_tripped = events
+        .iter()
+        .any(|e| matches!(e, GantryEvent::BudgetExceeded { .. }));
+    assert!(
+        !global_tripped,
+        "global budget_exceeded must not fire for a slice-only failure"
+    );
+}
+
+/// When aggregate token consumption reaches the global `--max-tokens` cap the
+/// run must exit with code `budget` (2). Here the cap is tripped during the
+/// unify call, after both subagents complete within their slices.
+#[tokio::test]
+async fn team_mode_global_budget_cap_exits_budget() {
+    let _guard = TestEmitterGuard::install();
+    let dir = TempDir::new().unwrap();
+
+    // Standard provider: every call returns 1 input + 1 output = 2 tokens.
+    // max_tokens=7: compose(2) + subA(2) + subB(2) = 6; unify(2) → total=8 > 7 → Budget.
+    // Slices: remaining after compose = 5; 5/2 = 2 each; each subagent uses 2 ≤ 2 → OK.
+    let provider = Arc::new(TeamScriptProvider::new(
+        r#"{"subagents":[{"name":"a","role":"a","scope":"full"},{"name":"b","role":"b","scope":"full"}]}"#,
+    ));
+    let exit = run_team_mode(&dir, provider, 7).await;
+    assert_eq!(
+        exit,
+        ExitCode::Budget,
+        "global cap must produce exit budget (2)"
+    );
+}

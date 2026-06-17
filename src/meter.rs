@@ -50,8 +50,9 @@ impl TokenMeter {
             .fetch_add(cache_read, Ordering::SeqCst);
         self.total_cache_write
             .fetch_add(cache_write, Ordering::SeqCst);
-        let total =
-            self.total_input.load(Ordering::SeqCst) + self.total_output.load(Ordering::SeqCst);
+        let total = self.total_input.load(Ordering::SeqCst)
+            + self.total_output.load(Ordering::SeqCst)
+            + self.total_cache_write.load(Ordering::SeqCst);
         if total >= self.limit {
             // CAS so only the first crossing emits.
             if self
@@ -86,6 +87,23 @@ impl TokenMeter {
 
     pub fn tripped(&self) -> bool {
         self.tripped.load(Ordering::SeqCst)
+    }
+
+    pub fn limit(&self) -> u64 {
+        self.limit
+    }
+
+    /// Tokens consumed so far using the G7 formula: input + output + cache_write.
+    /// cache_read is excluded because it does not burn new tokens from the budget.
+    pub fn consumed(&self) -> u64 {
+        self.total_input.load(Ordering::SeqCst)
+            + self.total_output.load(Ordering::SeqCst)
+            + self.total_cache_write.load(Ordering::SeqCst)
+    }
+
+    /// Remaining budget using the G7 formula (saturating: never wraps below zero).
+    pub fn remaining(&self) -> u64 {
+        self.limit.saturating_sub(self.consumed())
     }
 
     pub fn cancellation_token(&self) -> CancellationToken {
