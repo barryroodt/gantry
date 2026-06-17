@@ -116,7 +116,7 @@ impl Provider {
         match self {
             Self::Anthropic => "anthropic",
             Self::OpenAi => "openai",
-            Self::Gemini => "gemini",
+            Self::Gemini => "google",
             Self::Local => "local",
         }
     }
@@ -126,7 +126,7 @@ impl Provider {
         match name {
             "anthropic" => Some(Self::Anthropic),
             "openai" => Some(Self::OpenAi),
-            "gemini" => Some(Self::Gemini),
+            "google" => Some(Self::Gemini),
             "local" => Some(Self::Local),
             _ => None,
         }

@@ -61,7 +61,7 @@ Each line of stdout is one JSON event; the final `result` event carries the exit
 
 | Flag | Required | Description |
 |---|---|---|
-| `--model <provider/model>` | yes | Provider slug + model id, e.g. `anthropic/claude-opus-4-8`, `openai/gpt-4o`, `gemini/gemini-2.5-pro`, `local/qwen3-coder-next`. |
+| `--model <provider/model>` | yes | Provider slug + model id, e.g. `anthropic/claude-opus-4-8`, `openai/gpt-4o`, `google/gemini-2.5-pro`, `local/qwen3-coder-next`. |
 | `--workdir <dir>` | yes | Working directory; all file tools are confined to it. |
 | `--prompt-file <path>` | yes | The user prompt, read from a file. |
 | `--max-tokens <n>` | yes | Hard token budget; the run stops with exit `budget` if exceeded. |
@@ -83,7 +83,7 @@ Each line of stdout is one JSON event; the final `result` event carries the exit
 |---|---|---|---|
 | Anthropic | `anthropic/` | `ANTHROPIC_API_KEY` | `ANTHROPIC_API_BASE` |
 | OpenAI | `openai/` | `OPENAI_API_KEY` | `OPENAI_BASE_URL` |
-| Gemini | `gemini/` | `GEMINI_API_KEY` | `GEMINI_API_BASE` |
+| Gemini | `google/` | `GEMINI_API_KEY` | `GEMINI_API_BASE` |
 | Local (OpenAI-compatible) | `local/` | `GANTRY_LOCAL_API_KEY` (optional) | `--base-url` / `GANTRY_LOCAL_BASE_URL` |
 
 Everything after the first `/` in `--model` is the bare model id forwarded to that provider. The base-URL overrides let you point at a proxy, gateway, or self-hosted endpoint.
