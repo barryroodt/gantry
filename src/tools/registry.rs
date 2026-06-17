@@ -39,6 +39,7 @@ pub fn available_tool_names() -> Vec<&'static str> {
 /// Native tool dispatcher. Owns workdir + emits `tool_call` / `tool_result` pairs around each call.
 pub struct ToolRegistry {
     workdir: PathBuf,
+    skills_dir: PathBuf,
     allow: Vec<String>,
     shell_allow: Vec<String>,
     control: Vec<String>,
@@ -47,8 +48,10 @@ pub struct ToolRegistry {
 
 impl ToolRegistry {
     pub fn new(workdir: PathBuf, allow: Vec<String>) -> Self {
+        let skills_dir = workdir.join(".claude/skills");
         Self {
             workdir,
+            skills_dir,
             allow,
             shell_allow: shell::ALLOWED_PROGRAMS
                 .iter()
@@ -71,6 +74,15 @@ impl ToolRegistry {
         if !allow.is_empty() {
             self.shell_allow = allow;
         }
+        self
+    }
+
+    /// Override the skills resolution root (from `--skills-dir`). Defaults to
+    /// `<workdir>/.claude/skills`. Pass `validated.skills_dir` at call sites
+    /// where the flag may have been supplied.
+    #[must_use]
+    pub fn with_skills_dir(mut self, skills_dir: PathBuf) -> Self {
+        self.skills_dir = skills_dir;
         self
     }
 
@@ -298,7 +310,7 @@ impl ToolRegistry {
             "skill_load" => {
                 let args: skill_load::SkillLoadArgs = serde_json::from_str(args_json)
                     .map_err(|e| ToolError::InvalidInput(e.to_string()))?;
-                skill_load::skill_load(&self.workdir, args).await
+                skill_load::skill_load(&self.skills_dir, args).await
             }
             "write_file" => {
                 let args: write_file::WriteFileArgs = serde_json::from_str(args_json)

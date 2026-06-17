@@ -140,6 +140,7 @@ fn test_validated(workdir: &TempDir, prompt_file: &std::path::Path) -> Validated
         max_iterations: 5,
         context_limit: None,
         base_url: None,
+        skills_dir: workdir.path().join(".claude/skills"),
     }
 }
 
@@ -166,7 +167,7 @@ async fn run_mode(
         meter,
         cancel,
         registry: ToolRegistry::new(dir.path().to_path_buf(), vec![]),
-        skill_loader: SkillLoader::new(dir.path().to_path_buf()),
+        skill_loader: SkillLoader::new(dir.path().join(".claude/skills")),
         provider,
         prompt: "review this code".into(),
     }
@@ -315,7 +316,7 @@ async fn single_mode_uses_supplied_system_prompt() {
         meter,
         cancel,
         registry: ToolRegistry::new(dir.path().to_path_buf(), vec![]),
-        skill_loader: SkillLoader::new(dir.path().to_path_buf()),
+        skill_loader: SkillLoader::new(dir.path().join(".claude/skills")),
         provider: Box::new(provider),
         prompt: "do the task".into(),
     }
@@ -356,7 +357,7 @@ async fn single_mode_default_system_prompt_when_none() {
         meter,
         cancel,
         registry: ToolRegistry::new(dir.path().to_path_buf(), vec![]),
-        skill_loader: SkillLoader::new(dir.path().to_path_buf()),
+        skill_loader: SkillLoader::new(dir.path().join(".claude/skills")),
         provider: Box::new(provider),
         prompt: "do the task".into(),
     }

@@ -31,7 +31,8 @@ pub async fn run_loop(validated: Validated) -> ModeRunOutcome {
     // keeps its normal "empty = all base tools" semantics.
     let registry = ToolRegistry::new(validated.workdir.clone(), validated.tools.clone())
         .with_shell_allow(validated.shell_allow.clone())
-        .with_control(DECIDE_STOP);
+        .with_control(DECIDE_STOP)
+        .with_skills_dir(validated.skills_dir.clone());
 
     let system_prefix = skill_loader.inject_core_skills(&validated.inject_skills);
     let body = validated

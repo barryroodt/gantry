@@ -78,6 +78,7 @@ fn test_validated(workdir: &TempDir, prompt_file: &std::path::Path) -> Validated
         max_iterations: 10,
         context_limit: None,
         base_url: None,
+        skills_dir: workdir.path().join(".claude/skills"),
     }
 }
 
@@ -155,7 +156,7 @@ async fn cap_then_retrieve_roundtrips_over_event_stream() {
         meter,
         cancel,
         registry: ToolRegistry::new(dir.path().to_path_buf(), vec![]),
-        skill_loader: SkillLoader::new(dir.path().to_path_buf()),
+        skill_loader: SkillLoader::new(dir.path().join(".claude/skills")),
         provider: Box::new(provider),
         prompt: "analyse big.txt".into(),
     }

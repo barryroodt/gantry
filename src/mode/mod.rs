@@ -61,7 +61,7 @@ pub(crate) fn bootstrap(validated: &Validated) -> Result<RunBootstrap, ModeRunOu
     .map_err(|e| config_error(&meter, &e.to_string()))?;
     let prompt = std::fs::read_to_string(&validated.prompt_file)
         .map_err(|e| config_error(&meter, &format!("prompt file: {e}")))?;
-    let skill_loader = SkillLoader::new(validated.workdir.clone());
+    let skill_loader = SkillLoader::new(validated.skills_dir.clone());
 
     Ok(RunBootstrap {
         cancel,
