@@ -37,6 +37,25 @@ mise exec -- cargo build --release # binary at target/release/gantry
 
 Without mise, use any Rust ≥ 1.96 toolchain and plain `cargo build --release`.
 
+## Releases
+
+Pushing a `v*` tag publishes a GitHub release with prebuilt Linux binaries, each built **natively** on its architecture:
+
+- `gantry-<tag>-x86_64-unknown-linux-gnu.tar.gz`
+- `gantry-<tag>-aarch64-unknown-linux-gnu.tar.gz`
+- `SHA256SUMS` — coreutils `sha256sum` format, covering both tarballs
+
+**Pinned artifact contract** (consumers depend on this; it will not change without a MAJOR bump): each tarball contains exactly one member, `gantry`, at the archive root — flat, no directory prefix. Verify and extract a pinned binary with:
+
+```bash
+# from a directory holding the downloaded tarball + SHA256SUMS
+asset=gantry-v0.1.0-x86_64-unknown-linux-gnu.tar.gz
+grep " $asset$" SHA256SUMS | sha256sum -c -
+tar -xzf "$asset" -C /usr/local/bin gantry
+```
+
+The workflow packs with `tar -czf <out> -C <distdir> gantry`, storing the member flat as `gantry` (never `./gantry`) so `tar -xzf … gantry` stays stable. See [`.github/workflows/release.yml`](.github/workflows/release.yml) and [ADR-0015](docs/decisions/0015-release-artifact-contract.md).
+
 ## Quickstart
 
 ```bash
