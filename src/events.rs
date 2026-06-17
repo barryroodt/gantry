@@ -6,7 +6,7 @@ pub const TRUNCATE_MARKER: &str = "…[truncated]";
 /// NDJSON contract version stamped on the `start` event. Semver: MAJOR =
 /// remove/rename a field or event, or change semantics; MINOR = additive
 /// field/event/exit-code.
-pub const SCHEMA_VERSION: &str = "1.0";
+pub const SCHEMA_VERSION: &str = "1.1";
 
 pub fn now_ms() -> u64 {
     std::time::SystemTime::now()
@@ -93,6 +93,8 @@ pub enum GantryEvent {
         output_tokens: u64,
         cache_read: u64,
         cache_write: u64,
+        /// Wall time of this model call in milliseconds.
+        duration_ms: u64,
     },
     HistoryCompacted {
         ts: u64,
@@ -132,6 +134,12 @@ pub enum GantryEvent {
         turns: u32,
         input_tokens: u64,
         output_tokens: u64,
+        /// Cache read tokens consumed by this subagent (aggregate over all rounds).
+        cache_read: u64,
+        /// Cache write tokens consumed by this subagent (aggregate over all rounds).
+        cache_write: u64,
+        /// Wall time from spawn to done in milliseconds.
+        duration_ms: u64,
     },
     SubagentFailed {
         ts: u64,

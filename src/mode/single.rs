@@ -115,6 +115,7 @@ pub(crate) async fn run_agent_pass(
             break;
         }
 
+        let call_start = std::time::Instant::now();
         let resp_fut = provider.complete(system, &messages, &tools);
         let resp = tokio::select! {
             r = resp_fut => r,
@@ -150,6 +151,7 @@ pub(crate) async fn run_agent_pass(
             };
         }
 
+        let call_duration_ms = call_start.elapsed().as_millis() as u64;
         let _ = GantryEvent::AgentTurn {
             ts: now_ms(),
             role: role.into(),
@@ -158,6 +160,7 @@ pub(crate) async fn run_agent_pass(
             output_tokens: resp.output_tokens,
             cache_read: resp.cache_read,
             cache_write: resp.cache_write,
+            duration_ms: call_duration_ms,
         }
         .emit();
 

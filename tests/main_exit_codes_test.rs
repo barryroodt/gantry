@@ -349,9 +349,9 @@ async fn main_exit_rate_limited_for_persistent_429() {
     assert!(
         matches!(
             &events[0],
-            GantryEvent::Start { schema_version, .. } if schema_version == "1.0"
+            GantryEvent::Start { schema_version, .. } if schema_version == "1.1"
         ),
-        "first event must be start with schema_version 1.0, got {:?}",
+        "first event must be start with schema_version 1.1, got {:?}",
         events[0]
     );
     assert!(
