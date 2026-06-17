@@ -1,0 +1,112 @@
+name: Release
+
+# Tag-driven releases. Pushing a `v*` tag builds the gantry binary natively on
+# each supported architecture and publishes a GitHub release whose assets honor
+# the pinned artifact contract documented in the README and ADR-0015.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: build ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: true
+      matrix:
+        # Native build per arch (no cross-compilation): the dependency tree pulls
+        # aws-lc-sys / ring, which are painful to cross-compile but build cleanly
+        # on a native runner. Public repos get free `ubuntu-24.04-arm` runners.
+        include:
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-latest
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-24.04-arm
+    steps:
+      # Actions are pinned to commit SHAs (not mutable tags) so a moved/compromised
+      # tag cannot inject code into CI; the trailing comment tracks the version for
+      # Dependabot. Mirrors .github/workflows/ci.yml.
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      # Single source of truth for the Rust version: read it from mise.toml so the
+      # release build can never drift from CI / local dev.
+      - name: Read toolchain from mise.toml
+        id: rust
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import tomllib
+          t = tomllib.load(open("mise.toml", "rb"))["tools"]["rust"]
+          print(f"version={t['version']}")
+          PY
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master, pinned by SHA
+        with:
+          toolchain: ${{ steps.rust.outputs.version }}
+          targets: ${{ matrix.target }}
+
+      - name: Cargo cache
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2.9.1
+        with:
+          key: release-${{ matrix.target }}
+
+      # Build only the gantry binary (not the bench/evals workspace members).
+      # --locked: build the committed Cargo.lock exactly and fail on drift.
+      - name: Build gantry binary
+        run: cargo build --release --locked --target ${{ matrix.target }} -p gantry --bin gantry
+
+      - name: Package tarball (flat `gantry` member at archive root)
+        run: |
+          asset="gantry-${GITHUB_REF_NAME}-${{ matrix.target }}.tar.gz"
+          # `-C <dir> gantry` stores the member flat as `gantry` (never `./gantry`),
+          # so the consumer's `tar -xzf … gantry` extraction stays stable.
+          tar -czf "$asset" -C "target/${{ matrix.target }}/release" gantry
+          # Enforce the pinned layout contract before publishing: exactly one
+          # member, `gantry`, at the archive root.
+          test "$(tar -tzf "$asset")" = "gantry"
+          echo "ASSET=$asset" >> "$GITHUB_ENV"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ matrix.target }}
+          path: ${{ env.ASSET }}
+          if-no-files-found: error
+
+  release:
+    name: publish release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          path: dist
+          merge-multiple: true
+
+      # coreutils `sha256sum` format with bare filenames, so a consumer can verify
+      # with: grep " <asset>$" SHA256SUMS | sha256sum -c -
+      - name: Assemble checksums
+        working-directory: dist
+        run: |
+          ls -1 gantry-*.tar.gz
+          sha256sum gantry-*.tar.gz > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            dist/gantry-*.tar.gz dist/SHA256SUMS \
+            --repo "${GITHUB_REPOSITORY}" \
+            --title "${GITHUB_REF_NAME}" \
+            --generate-notes
