@@ -43,6 +43,16 @@ pub struct Cli {
     #[arg(long = "subagent-system-file", value_name = "PATH")]
     pub subagent_system_file: Option<PathBuf>,
 
+    /// Compose phase system prompt for team mode, read from this file. Overrides
+    /// the profile's `compose` file. Silently ignored outside team mode.
+    #[arg(long = "compose-file", value_name = "PATH")]
+    pub compose_file: Option<PathBuf>,
+
+    /// Unify phase system prompt for team mode, read from this file. Overrides
+    /// the profile's `unify` file. Silently ignored outside team mode.
+    #[arg(long = "unify-file", value_name = "PATH")]
+    pub unify_file: Option<PathBuf>,
+
     /// Restrict the tools exposed to the agent (repeatable). Default: all tools
     /// available for the selected mode. Each name must be valid for the mode.
     #[arg(long = "tool", value_name = "NAME")]
@@ -264,8 +274,14 @@ impl Cli {
                     .as_ref()
                     .and_then(|p| p.subagent_system_prompt.clone()),
             };
-        let compose_prompt = profile.as_ref().and_then(|p| p.compose_prompt.clone());
-        let unify_prompt = profile.as_ref().and_then(|p| p.unify_prompt.clone());
+        let compose_prompt = match read_optional_system_file(self.compose_file.as_deref())? {
+            Some(s) => Some(s),
+            None => profile.as_ref().and_then(|p| p.compose_prompt.clone()),
+        };
+        let unify_prompt = match read_optional_system_file(self.unify_file.as_deref())? {
+            Some(s) => Some(s),
+            None => profile.as_ref().and_then(|p| p.unify_prompt.clone()),
+        };
 
         let available = crate::tools::registry::available_tool_names();
         let tools = if self.tools.is_empty() {

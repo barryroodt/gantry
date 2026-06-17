@@ -70,6 +70,8 @@ Each line of stdout is one JSON event; the final `result` event carries the exit
 | `--profile <dir>` | no | Load a profile directory (see [Profiles](#profiles)). Explicit flags override profile values. |
 | `--system-file <path>` | no | System prompt (agent / coordinator persona). Defaults to a neutral prompt. |
 | `--subagent-system-file <path>` | no | System prompt for spawned subagents (team mode). |
+| `--compose-file <path>` | no | Compose-phase system prompt (team mode). Overrides the profile's `compose` file. Silently ignored outside team mode. |
+| `--unify-file <path>` | no | Unify-phase system prompt (team mode). Overrides the profile's `unify` file. Silently ignored outside team mode. |
 | `--tool <name>` | no | Restrict the exposed tools (repeatable). Default: all base tools for the mode. |
 | `--inject-skill <name>` | no | Inject `<workdir>/.claude/skills/<name>/SKILL.md` into the system prompt (repeatable). |
 | `--isolate` | no | Run against a copy-on-write shadow of the workdir (see [Isolation](#isolation)). |

@@ -278,3 +278,33 @@ async fn team_mode_uses_supplied_compose_prompt() {
         "compose call did not use the supplied compose prompt: {systems:?}"
     );
 }
+
+// ── G3: --unify-file ─────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn team_mode_uses_supplied_unify_prompt() {
+    let _guard = TestEmitterGuard::install();
+    let dir = TempDir::new().unwrap();
+    let prompt_path = dir.path().join("prompt.md");
+    std::fs::write(&prompt_path, "team review this code").unwrap();
+
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    let provider = Arc::new(TeamScriptProvider::capturing(
+        r#"{"subagents":[{"name":"correctness","role":"correctness","scope":"full"}]}"#,
+        tx,
+    ));
+
+    let mut validated = test_validated(&dir, &prompt_path);
+    validated.unify_prompt = Some("MARKER-UNIFY-PERSONA".into());
+
+    build_team(&dir, validated, provider).run().await;
+
+    let mut systems = Vec::new();
+    while let Ok(s) = rx.try_recv() {
+        systems.push(s);
+    }
+    assert!(
+        systems.iter().any(|s| s.contains("MARKER-UNIFY-PERSONA")),
+        "unify call did not use the supplied unify prompt: {systems:?}"
+    );
+}
