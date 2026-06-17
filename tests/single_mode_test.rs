@@ -370,3 +370,84 @@ async fn single_mode_default_system_prompt_when_none() {
         "default system prompt not used: {systems:?}"
     );
 }
+
+#[tokio::test]
+async fn single_mode_role_and_duration_ms_semantics() {
+    // G8: single mode agent_turn events carry role="single".
+    // G5: agent_turn.duration_ms is present and a sane non-negative value.
+    let guard = TestEmitterGuard::install();
+    let dir = TempDir::new().unwrap();
+
+    let provider = StubProvider::new(vec![
+        ProviderResponse {
+            text: String::new(),
+            tool_calls: vec![ToolCallRequest {
+                id: "t1".into(),
+                name: "read_file".into(),
+                args_json: r#"{"path":"sample.txt"}"#.into(),
+            }],
+            input_tokens: 10,
+            output_tokens: 5,
+            cache_read: 0,
+            cache_write: 0,
+        },
+        ProviderResponse {
+            text: "done".into(),
+            tool_calls: vec![],
+            input_tokens: 8,
+            output_tokens: 3,
+            cache_read: 0,
+            cache_write: 0,
+        },
+    ]);
+
+    let exit = run_mode(&dir, Box::new(provider), 100_000, 60_000).await;
+    assert_eq!(exit, ExitCode::Ok);
+
+    let events = guard.drain_events();
+
+    let agent_turns: Vec<_> = events
+        .iter()
+        .filter_map(|e| {
+            if let GantryEvent::AgentTurn {
+                role, duration_ms, ..
+            } = e
+            {
+                Some((role.clone(), *duration_ms))
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    assert!(
+        !agent_turns.is_empty(),
+        "expected at least one agent_turn event in single mode"
+    );
+    for (role, dur) in &agent_turns {
+        assert_eq!(
+            role, "single",
+            "single mode agent_turn must carry role='single', got {role:?}"
+        );
+        // u64 is always ≥ 0; assert sane wall time
+        assert!(
+            *dur < 60_000,
+            "agent_turn.duration_ms should be a sane wall time, got {dur}"
+        );
+    }
+
+    // tool_call and tool_result events also carry role="single"
+    for e in &events {
+        match e {
+            GantryEvent::ToolCall { role, .. } => assert_eq!(
+                role, "single",
+                "tool_call role must be 'single', got {role:?}"
+            ),
+            GantryEvent::AssistantText { role, .. } => assert_eq!(
+                role, "single",
+                "assistant_text role must be 'single', got {role:?}"
+            ),
+            _ => {}
+        }
+    }
+}

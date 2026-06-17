@@ -116,6 +116,7 @@ impl SubagentRoster {
             args.extra_context.as_deref(),
         );
         let join = tokio::spawn(async move {
+            let spawn_start = std::time::Instant::now();
             // First user turn carries the assignment; the "Role: " prefix stays so
             // the subagent's scope is explicit (and tests can detect a subagent turn).
             let mut messages: Vec<ChatMessage> = vec![ChatMessage::User(format!(
@@ -128,6 +129,8 @@ impl SubagentRoster {
             let mut input_tokens: u64 = 0;
             let mut output_tokens: u64 = 0;
             let mut subagent_consumed: u64 = 0;
+            let mut cache_read: u64 = 0;
+            let mut cache_write: u64 = 0;
             let mut stop = false;
 
             'rounds: loop {
@@ -172,6 +175,8 @@ impl SubagentRoster {
                     // Invariant #4: every response feeds the shared meter.
                     input_tokens += resp.input_tokens;
                     output_tokens += resp.output_tokens;
+                    cache_read += resp.cache_read;
+                    cache_write += resp.cache_write;
                     if meter
                         .add(
                             resp.input_tokens,
@@ -259,6 +264,9 @@ impl SubagentRoster {
                 turns: round,
                 input_tokens,
                 output_tokens,
+                cache_read,
+                cache_write,
+                duration_ms: spawn_start.elapsed().as_millis() as u64,
             }
             .emit();
         });

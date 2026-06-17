@@ -21,7 +21,7 @@ fn start_roundtrip() {
     roundtrip(&event);
     let json = serde_json::to_string(&event).expect("serialize");
     assert!(
-        json.contains(r#""schema_version":"1.0""#),
+        json.contains(r#""schema_version":"1.1""#),
         "start must carry the contract version: {json}"
     );
 }
@@ -45,6 +45,7 @@ fn agent_turn_roundtrip() {
         output_tokens: 50,
         cache_read: 10,
         cache_write: 5,
+        duration_ms: 42,
     });
 }
 
@@ -113,6 +114,9 @@ fn subagent_done_roundtrip() {
         turns: 3,
         input_tokens: 1000,
         output_tokens: 500,
+        cache_read: 20,
+        cache_write: 10,
+        duration_ms: 1500,
     });
 }
 

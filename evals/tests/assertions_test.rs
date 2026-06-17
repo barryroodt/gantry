@@ -295,6 +295,9 @@ fn assert_subagent_lifecycle_pass_and_fail() {
         turns: 2,
         input_tokens: 1,
         output_tokens: 1,
+        cache_read: 0,
+        cache_write: 0,
+        duration_ms: 10,
     };
 
     // Pass: one done per spawn, all before the fence.

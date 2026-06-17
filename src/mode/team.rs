@@ -195,10 +195,11 @@ impl TeamMode {
              this schema:\n```json\n{schema_pretty}\n```"
         );
         let mut last_text = String::new();
-        for _ in 0..2 {
+        for turn in 0..2u32 {
             if self.cancel.is_cancelled() {
                 return Err(self.cancel_exit());
             }
+            let call_start = std::time::Instant::now();
             let resp = tokio::select! {
                 r = self.provider.complete(&directive, messages, std::slice::from_ref(&respond)) => r,
                 _ = self.cancel.cancelled() => return Err(self.cancel_exit()),
@@ -207,6 +208,7 @@ impl TeamMode {
                 Ok(r) => r,
                 Err(err) => return Err(emit_provider_failure(&err)),
             };
+            let call_duration_ms = call_start.elapsed().as_millis() as u64;
             if self
                 .meter
                 .add(
@@ -219,6 +221,17 @@ impl TeamMode {
             {
                 return Err(ExitCode::Budget);
             }
+            let _ = GantryEvent::AgentTurn {
+                ts: now_ms(),
+                role: COORDINATOR_ROLE.into(),
+                turn,
+                input_tokens: resp.input_tokens,
+                output_tokens: resp.output_tokens,
+                cache_read: resp.cache_read,
+                cache_write: resp.cache_write,
+                duration_ms: call_duration_ms,
+            }
+            .emit();
             if let Some(call) = resp.tool_calls.iter().find(|c| c.name == "respond") {
                 if let Ok(v) = serde_json::from_str::<Value>(&call.args_json) {
                     return Ok(v);

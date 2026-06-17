@@ -4,6 +4,7 @@ use async_trait::async_trait;
 use gantry::cancel::{shared_token, spawn_timeout_watchdog};
 use gantry::cli::{Mode, Provider, Validated};
 use gantry::emitter::TestEmitterGuard;
+use gantry::events::SCHEMA_VERSION;
 use gantry::events::{ErrorKind, ExitCode, GantryEvent};
 use gantry::meter::TokenMeter;
 use gantry::mode::team::TeamMode;
@@ -533,5 +534,174 @@ async fn team_mode_global_budget_cap_exits_budget() {
         exit,
         ExitCode::Budget,
         "global cap must produce exit budget (2)"
+    );
+}
+
+#[tokio::test]
+async fn team_mode_schema_version_is_1_1_and_telemetry_fields_populated() {
+    // G5: start.schema_version == "1.1"; agent_turn.duration_ms / subagent_done fields
+    // are present and non-negative; Σ subagent input ≤ result total_input.
+    let guard = TestEmitterGuard::install();
+    let dir = TempDir::new().unwrap();
+    let provider = Arc::new(TeamScriptProvider::new(
+        r#"{"subagents":[{"name":"worker","role":"worker","scope":"all"}]}"#,
+    ));
+
+    let exit = run_team_mode(&dir, provider, 100_000).await;
+    assert_eq!(exit, ExitCode::Ok);
+
+    let events = guard.drain_events();
+
+    // Schema version: the constant must be 1.1 (start event is emitted by
+    // main.rs, so it won't appear in mode-level e2e tests; the roundtrip test
+    // exercises its serialized form).
+    assert_eq!(SCHEMA_VERSION, "1.1", "SCHEMA_VERSION constant must be 1.1");
+
+    // agent_turn events must carry non-negative duration_ms
+    let agent_turns: Vec<_> = events
+        .iter()
+        .filter_map(|e| {
+            if let GantryEvent::AgentTurn { duration_ms, .. } = e {
+                Some(*duration_ms)
+            } else {
+                None
+            }
+        })
+        .collect();
+    // team mode emits at least 2 coordinator agent_turns (compose + unify)
+    assert!(
+        agent_turns.len() >= 2,
+        "expected at least 2 coordinator agent_turn events, got {}: {events:?}",
+        agent_turns.len()
+    );
+    // u64 is always ≥ 0, but verify field is present by exhaustive pattern match
+    for dur in &agent_turns {
+        // duration_ms is u64: statically non-negative; assert < 60s (sane wall time)
+        assert!(
+            *dur < 60_000,
+            "agent_turn.duration_ms should be a sane wall time, got {dur}"
+        );
+    }
+
+    // subagent_done must carry cache_read, cache_write, duration_ms
+    let subagent_done_fields: Vec<_> = events
+        .iter()
+        .filter_map(|e| {
+            if let GantryEvent::SubagentDone {
+                input_tokens,
+                output_tokens,
+                cache_read,
+                cache_write,
+                duration_ms,
+                ..
+            } = e
+            {
+                Some((
+                    *input_tokens,
+                    *output_tokens,
+                    *cache_read,
+                    *cache_write,
+                    *duration_ms,
+                ))
+            } else {
+                None
+            }
+        })
+        .collect();
+    assert_eq!(
+        subagent_done_fields.len(),
+        1,
+        "expected one subagent_done for the single worker"
+    );
+    let (sub_input, _sub_output, _sub_cr, _sub_cw, sub_dur) = subagent_done_fields[0];
+    assert!(sub_dur < 60_000, "subagent_done.duration_ms should be sane");
+
+    // Σ subagent input_tokens ≤ result.total_input
+    let result_total_input = events.iter().find_map(|e| {
+        if let GantryEvent::Result { total_input, .. } = e {
+            Some(*total_input)
+        } else {
+            None
+        }
+    });
+    if let Some(total) = result_total_input {
+        assert!(
+            sub_input <= total,
+            "Σ subagent input_tokens ({sub_input}) must be ≤ result.total_input ({total})"
+        );
+    }
+}
+
+#[tokio::test]
+async fn team_mode_role_semantics() {
+    // G8: coordinator events carry role="coordinator"; subagent events carry
+    // role=<subagent_name>. This makes role values contract, not coincidence.
+    let guard = TestEmitterGuard::install();
+    let dir = TempDir::new().unwrap();
+    let provider = Arc::new(TeamScriptProvider::new(
+        r#"{"subagents":[{"name":"alpha","role":"alpha","scope":"all"}]}"#,
+    ));
+
+    let exit = run_team_mode(&dir, provider, 100_000).await;
+    assert_eq!(exit, ExitCode::Ok);
+
+    let events = guard.drain_events();
+
+    // All coordinator agent_turn events must have role == "coordinator"
+    for e in &events {
+        if let GantryEvent::AgentTurn { role, .. } = e {
+            assert_eq!(
+                role, "coordinator",
+                "team mode agent_turn must have role=coordinator, got role={role:?}"
+            );
+        }
+    }
+
+    // Subagent AssistantText events must carry the subagent's name as role
+    let subagent_text_roles: Vec<_> = events
+        .iter()
+        .filter_map(|e| {
+            if let GantryEvent::AssistantText { role, text, .. } = e {
+                // Exclude the coordinator fence (contains ```json)
+                if !text.contains("```json") {
+                    Some(role.clone())
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        })
+        .collect();
+    assert!(
+        !subagent_text_roles.is_empty(),
+        "expected at least one non-fence assistant_text from subagent"
+    );
+    for role in &subagent_text_roles {
+        assert_eq!(
+            role, "alpha",
+            "subagent assistant_text must carry role=<subagent_name>, got {role:?}"
+        );
+    }
+
+    // Coordinator AssistantText fence must have role == "coordinator"
+    let fence_roles: Vec<_> = events
+        .iter()
+        .filter_map(|e| {
+            if let GantryEvent::AssistantText { role, text, .. } = e {
+                if text.contains("```json") {
+                    Some(role.clone())
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        })
+        .collect();
+    assert_eq!(fence_roles.len(), 1, "expected exactly one fence");
+    assert_eq!(
+        fence_roles[0], "coordinator",
+        "coordinator fence must have role=coordinator"
     );
 }
