@@ -47,11 +47,11 @@ jobs:
       - name: Read toolchain from mise.toml
         id: rust
         run: |
-          python3 - <<'PY' >> "$GITHUB_OUTPUT"
-          import tomllib
-          t = tomllib.load(open("mise.toml", "rb"))["tools"]["rust"]
-          print(f"version={t['version']}")
-          PY
+          # No TOML parser: the build host is Ubuntu 22.04, whose system python3
+          # (3.10) lacks tomllib (3.11+). Extract the pinned version with sed.
+          version=$(sed -nE 's/^rust = .*version = "([^"]+)".*/\1/p' mise.toml)
+          test -n "$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master, pinned by SHA
