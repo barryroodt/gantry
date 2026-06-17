@@ -16,16 +16,25 @@ use crate::provider::{
 pub struct OpenAiProvider {
     model: String,
     client: openai::Client,
+    provider: Provider,
+    /// Endpoint this adapter targets, used only to make `local` connection
+    /// failures self-explanatory. `None` for hosted OpenAI on its default base.
+    base_url: Option<String>,
 }
 
+/// Bearer sent to a local server when no key is configured; servers that
+/// don't enforce auth ignore it.
+const PLACEHOLDER_API_KEY: &str = "local";
+
 impl OpenAiProvider {
-    pub fn new(model: String) -> anyhow::Result<Self> {
+    /// Hosted OpenAI: requires `OPENAI_API_KEY`, honors `OPENAI_BASE_URL`.
+    pub fn openai(model: String) -> anyhow::Result<Self> {
         let api_key = std::env::var("OPENAI_API_KEY")
             .map_err(|_| anyhow::anyhow!("OPENAI_API_KEY not set"))?;
 
+        let base_url = std::env::var("OPENAI_BASE_URL").ok();
         let mut builder = openai::Client::builder().api_key(api_key);
-
-        if let Ok(base_url) = std::env::var("OPENAI_BASE_URL") {
+        if let Some(base_url) = &base_url {
             builder = builder.base_url(base_url);
         }
 
@@ -33,7 +42,32 @@ impl OpenAiProvider {
             .build()
             .map_err(|e| anyhow::anyhow!("failed to build OpenAI client: {e}"))?;
 
-        Ok(Self { model, client })
+        Ok(Self {
+            model,
+            client,
+            provider: Provider::OpenAi,
+            base_url,
+        })
+    }
+
+    /// Generic OpenAI-compatible local/self-hosted server (oMLX, Ollama, vLLM,
+    /// LM Studio). `base_url` is required (already resolved by the caller);
+    /// `api_key` is optional — most local servers need none, so a placeholder
+    /// bearer is sent when absent (the server ignores it when auth is off).
+    pub fn local(model: String, base_url: String, api_key: Option<String>) -> anyhow::Result<Self> {
+        let api_key = api_key.unwrap_or_else(|| PLACEHOLDER_API_KEY.to_string());
+        let client = openai::Client::builder()
+            .api_key(api_key)
+            .base_url(&base_url)
+            .build()
+            .map_err(|e| anyhow::anyhow!("failed to build local OpenAI-compatible client: {e}"))?;
+
+        Ok(Self {
+            model,
+            client,
+            provider: Provider::Local,
+            base_url: Some(base_url),
+        })
     }
 }
 
@@ -164,7 +198,7 @@ fn openai_response_to_provider(
 #[async_trait]
 impl ProviderAdapter for OpenAiProvider {
     fn provider(&self) -> Provider {
-        Provider::OpenAi
+        self.provider.clone()
     }
 
     fn model(&self) -> &str {
@@ -178,10 +212,19 @@ impl ProviderAdapter for OpenAiProvider {
         tools: &[ToolSchema],
     ) -> anyhow::Result<ProviderResponse> {
         let config = RetryConfig::default();
-        with_retry(&config, classify_error, || {
+        let result = with_retry(&config, classify_error, || {
             Box::pin(self.complete_once(system, messages, tools))
         })
-        .await
+        .await;
+        // When the endpoint was explicitly configured (always for `local`, and
+        // for hosted OpenAI when OPENAI_BASE_URL is set), name it on a
+        // connection failure so an unreachable server is self-explanatory.
+        match (&self.base_url, result) {
+            (Some(base), Err(e)) if is_connection_error(&e) => {
+                Err(endpoint_unreachable_error(base, e))
+            }
+            (_, other) => other,
+        }
     }
 }
 
@@ -226,5 +269,58 @@ impl OpenAiProvider {
             .map_err(|e| anyhow::anyhow!("{e}"))?;
 
         openai_response_to_provider(response.raw_response)
+    }
+}
+
+/// Best-effort detection of a "server unreachable" error (rig wraps reqwest, so
+/// we match on text — same approach as `retry::classify_error`).
+fn is_connection_error(err: &anyhow::Error) -> bool {
+    let msg = format!("{err:#}").to_lowercase();
+    [
+        "connection refused",
+        "tcp connect",
+        "error sending request",
+        "connection reset",
+        "connect error",
+        "dns error",
+    ]
+    .iter()
+    .any(|m| msg.contains(m))
+}
+
+/// Wrap a connection failure with a hint naming the endpoint, so an unreachable
+/// server is self-explanatory.
+fn endpoint_unreachable_error(base_url: &str, source: anyhow::Error) -> anyhow::Error {
+    anyhow::anyhow!(
+        "could not reach the server at {base_url} — is it running? (underlying error: {source:#})"
+    )
+}
+
+#[cfg(test)]
+mod local_error_tests {
+    use super::*;
+
+    #[test]
+    fn detects_connection_errors() {
+        let refused = anyhow::anyhow!(
+            "error sending request for url (http://localhost:8000/v1/chat/completions): \
+             tcp connect error: Connection refused (os error 61)"
+        );
+        assert!(is_connection_error(&refused));
+        // A normal API error is not a connection failure.
+        assert!(!is_connection_error(&anyhow::anyhow!(
+            "404 Not Found: model missing"
+        )));
+    }
+
+    #[test]
+    fn hint_names_the_endpoint() {
+        let wrapped = endpoint_unreachable_error(
+            "http://localhost:8000/v1",
+            anyhow::anyhow!("tcp connect error: Connection refused"),
+        );
+        let msg = wrapped.to_string();
+        assert!(msg.contains("http://localhost:8000/v1"));
+        assert!(msg.contains("is it running?"));
     }
 }

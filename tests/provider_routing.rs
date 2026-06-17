@@ -5,7 +5,7 @@ use std::sync::{LazyLock, Mutex, MutexGuard};
 #[test]
 fn build_adapter_anthropic_requires_api_key() {
     let _env = EnvVarGuard::set("ANTHROPIC_API_KEY", None);
-    let result = build_adapter(Provider::Anthropic, "claude-sonnet-4".into());
+    let result = build_adapter(Provider::Anthropic, "claude-sonnet-4".into(), None);
     assert!(result.is_err());
     assert!(result
         .err()
@@ -17,7 +17,7 @@ fn build_adapter_anthropic_requires_api_key() {
 #[test]
 fn build_adapter_openai_requires_api_key() {
     let _env = EnvVarGuard::set("OPENAI_API_KEY", None);
-    let result = build_adapter(Provider::OpenAi, "gpt-4o".into());
+    let result = build_adapter(Provider::OpenAi, "gpt-4o".into(), None);
     assert!(result.is_err());
     assert!(result
         .err()
@@ -29,13 +29,24 @@ fn build_adapter_openai_requires_api_key() {
 #[test]
 fn build_adapter_gemini_requires_api_key() {
     let _env = EnvVarGuard::set("GEMINI_API_KEY", None);
-    let result = build_adapter(Provider::Gemini, "gemini-2.0-flash".into());
+    let result = build_adapter(Provider::Gemini, "gemini-2.0-flash".into(), None);
     assert!(result.is_err());
     assert!(result
         .err()
         .expect("error")
         .to_string()
         .contains("GEMINI_API_KEY not set"));
+}
+
+#[test]
+fn build_adapter_local_needs_no_api_key() {
+    // The local provider builds with no key env set; the --base-url flag (here
+    // None → default) is the only local-specific input.
+    let _env = EnvVarGuard::set("GANTRY_LOCAL_API_KEY", None);
+    let adapter = build_adapter(Provider::Local, "qwen3-coder-next".into(), None)
+        .expect("local adapter builds without an API key");
+    assert_eq!(adapter.provider(), Provider::Local);
+    assert_eq!(adapter.model(), "qwen3-coder-next");
 }
 
 /// Process-wide lock serializing env-mutating tests in this binary; env vars are
@@ -86,6 +97,8 @@ fn parse_slug_routes_provider_table() {
         ("openai/o3-mini", Provider::OpenAi),
         ("gemini/gemini-2.0-flash", Provider::Gemini),
         ("gemini/gemini-1.5-pro", Provider::Gemini),
+        ("local/qwen3-coder-next", Provider::Local),
+        ("local/llama-3.3-70b", Provider::Local),
     ];
 
     for (slug, expected) in cases {

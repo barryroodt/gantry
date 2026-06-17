@@ -84,6 +84,7 @@ fn test_validated(workdir: &TempDir, prompt_file: &std::path::Path) -> Validated
         isolate: false,
         max_iterations: 5,
         context_limit: None,
+        base_url: None,
     }
 }
 

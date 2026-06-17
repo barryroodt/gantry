@@ -32,6 +32,7 @@ fn base_cli(workdir: &Path, prompt_file: &Path) -> Cli {
         isolate: false,
         max_iterations: None,
         context_limit: None,
+        base_url: None,
     }
 }
 
@@ -49,6 +50,11 @@ fn parse_slug_routes_each_provider() {
             "gemini/gemini-2.0-flash",
             Provider::Gemini,
             "gemini-2.0-flash",
+        ),
+        (
+            "local/qwen3-coder-next",
+            Provider::Local,
+            "qwen3-coder-next",
         ),
     ];
 
@@ -133,6 +139,68 @@ fn parse_and_validate_canonicalises_workdir() {
     .expect("parse_and_validate");
 
     assert_eq!(validated.workdir, canonical);
+}
+
+#[test]
+fn base_url_rejected_for_non_local_provider() {
+    let dir = temp_workdir("baseurl-nonlocal");
+    let prompt = write_prompt_file(&dir, "prompt.txt", "hello");
+
+    let err = Cli::parse_and_validate_from([
+        "gantry",
+        "--mode",
+        "single",
+        "--model",
+        "openai/gpt-4o",
+        "--workdir",
+        dir.to_str().unwrap(),
+        "--prompt-file",
+        prompt.to_str().unwrap(),
+        "--max-tokens",
+        "8192",
+        "--timeout-ms",
+        "60000",
+        "--base-url",
+        "http://localhost:8000/v1",
+    ])
+    .expect_err("--base-url with a non-local provider must be rejected");
+    assert_eq!(
+        err,
+        ConfigError::BaseUrlNotLocal {
+            provider: "openai".into(),
+        }
+    );
+}
+
+#[test]
+fn base_url_accepted_and_threaded_for_local_provider() {
+    let dir = temp_workdir("baseurl-local");
+    let prompt = write_prompt_file(&dir, "prompt.txt", "hello");
+
+    let validated = Cli::parse_and_validate_from([
+        "gantry",
+        "--mode",
+        "single",
+        "--model",
+        "local/qwen3-coder-next",
+        "--workdir",
+        dir.to_str().unwrap(),
+        "--prompt-file",
+        prompt.to_str().unwrap(),
+        "--max-tokens",
+        "8192",
+        "--timeout-ms",
+        "60000",
+        "--base-url",
+        "http://localhost:9999/v1",
+    ])
+    .expect("local provider accepts --base-url");
+    assert_eq!(validated.provider, Provider::Local);
+    assert_eq!(validated.model, "qwen3-coder-next");
+    assert_eq!(
+        validated.base_url.as_deref(),
+        Some("http://localhost:9999/v1")
+    );
 }
 
 #[test]

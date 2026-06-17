@@ -23,7 +23,7 @@ Most agent frameworks want to live *inside* your process and own your control fl
 - **Output compression** — verbose tool output is capped (head+tail with a recovery hint) and deduped at the tool boundary to keep the model's context tight; savings are reported per call.
 - **Profiles** — a directory of prompts + a `profile.toml` captures a reusable configuration (persona, toolset, mode, skills). Two examples ship in [`profiles/`](profiles/).
 - **Skill injection** — inject Markdown "skills" from the workspace into the system prompt at startup.
-- **Pluggable providers** — Anthropic, OpenAI, and Gemini via [rig](https://github.com/0xPlaygrounds/rig); each with a base-URL override for proxies and self-hosting.
+- **Pluggable providers** — Anthropic, OpenAI, Gemini, and a generic OpenAI-compatible `local` provider (oMLX, Ollama, vLLM, LM Studio) via [rig](https://github.com/0xPlaygrounds/rig); each with a base-URL override for proxies and self-hosting.
 - **Budget + timeout + signals** — a hard token budget and wall-clock timeout bound every run; SIGINT/SIGTERM shut down cleanly with a deterministic exit code.
 
 ## Install / Build
@@ -61,7 +61,7 @@ Each line of stdout is one JSON event; the final `result` event carries the exit
 
 | Flag | Required | Description |
 |---|---|---|
-| `--model <provider/model>` | yes | Provider slug + model id, e.g. `anthropic/claude-opus-4-8`, `openai/gpt-4o`, `gemini/gemini-2.5-pro`. |
+| `--model <provider/model>` | yes | Provider slug + model id, e.g. `anthropic/claude-opus-4-8`, `openai/gpt-4o`, `gemini/gemini-2.5-pro`, `local/qwen3-coder-next`. |
 | `--workdir <dir>` | yes | Working directory; all file tools are confined to it. |
 | `--prompt-file <path>` | yes | The user prompt, read from a file. |
 | `--max-tokens <n>` | yes | Hard token budget; the run stops with exit `budget` if exceeded. |
@@ -74,6 +74,7 @@ Each line of stdout is one JSON event; the final `result` event carries the exit
 | `--inject-skill <name>` | no | Inject `<workdir>/.claude/skills/<name>/SKILL.md` into the system prompt (repeatable). |
 | `--isolate` | no | Run against a copy-on-write shadow of the workdir (see [Isolation](#isolation)). |
 | `--max-iterations <n>` | no | Iteration cap for `--mode loop` (default 5, min 1). |
+| `--base-url <URL>` | no | OpenAI-compatible endpoint for the `local` provider (e.g. `http://localhost:8000/v1`). Overrides `GANTRY_LOCAL_BASE_URL`. Rejected for non-local providers. |
 | `--context-limit <TOKENS>` | no | Opt-in transcript compaction threshold. When the previous turn's total context occupancy (uncached `input_tokens` + `cache_read` + `cache_write`) exceeds this value, tool results older than the last 3 turns (>512 B, not already a stub) are folded into `retrieve`-able stubs to free context-window headroom. Off by default; single and loop modes only (no effect in team mode). |
 
 ### Providers
@@ -83,8 +84,21 @@ Each line of stdout is one JSON event; the final `result` event carries the exit
 | Anthropic | `anthropic/` | `ANTHROPIC_API_KEY` | `ANTHROPIC_API_BASE` |
 | OpenAI | `openai/` | `OPENAI_API_KEY` | `OPENAI_BASE_URL` |
 | Gemini | `gemini/` | `GEMINI_API_KEY` | `GEMINI_API_BASE` |
+| Local (OpenAI-compatible) | `local/` | `GANTRY_LOCAL_API_KEY` (optional) | `--base-url` / `GANTRY_LOCAL_BASE_URL` |
 
 Everything after the first `/` in `--model` is the bare model id forwarded to that provider. The base-URL overrides let you point at a proxy, gateway, or self-hosted endpoint.
+
+#### Self-hosted / local models (oMLX)
+
+The `local` provider targets any OpenAI-compatible server — [oMLX](https://omlx.ai/) (native macOS MLX, the headline use case), Ollama, vLLM, LM Studio, llama.cpp. The model id after `local/` is whatever the server serves. Endpoint resolution is `--base-url` → `GANTRY_LOCAL_BASE_URL` → `http://localhost:8000/v1` (oMLX's default; the `/v1` suffix is required). No API key is needed — set `GANTRY_LOCAL_API_KEY` only if your server enforces auth.
+
+```bash
+gantry --mode single \
+  --model local/qwen3-coder-next \
+  --base-url http://localhost:8000/v1 \
+  --workdir . --prompt-file /tmp/task.md \
+  --max-tokens 200000 --timeout-ms 600000
+```
 
 ## Modes
 
@@ -202,7 +216,7 @@ A thin binary (`src/main.rs`) parses + validates the CLI, emits `start`, runs th
 - `cli` — flag parsing, validation, provider-slug parsing, profile merge.
 - `mode` — `bootstrap` (shared run scaffolding) + `single`, `team`, `loop_mode`, `isolation`.
 - `tools` — the registry (visibility/dispatch), each tool, the workdir guard, and output compression.
-- `provider` — the `ProviderAdapter` trait + Anthropic/OpenAI/Gemini adapters over rig.
+- `provider` — the `ProviderAdapter` trait + Anthropic/OpenAI/Gemini adapters over rig; the `local` provider reuses the OpenAI-compatible engine with a configurable base URL and optional key.
 - `events` / `emitter` — the NDJSON event model and the stdout sink.
 - `meter` — token accounting + budget enforcement; `cancel` — timeout + signal handling.
 - `profile` — profile-directory loading; `skills` — skill resolution.

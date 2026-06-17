@@ -175,7 +175,7 @@ async fn complete_maps_single_tool_call_and_token_usage() {
         ),
     ]);
 
-    let provider = OpenAiProvider::new("gpt-4o".into()).expect("provider");
+    let provider = OpenAiProvider::openai("gpt-4o".into()).expect("provider");
     let tools = [ToolSchema {
         name: "get_weather".into(),
         description: "Get weather for a city".into(),
@@ -251,7 +251,7 @@ async fn complete_preserves_parallel_tool_call_emission_order() {
         ),
     ]);
 
-    let provider = OpenAiProvider::new("gpt-4o".into()).expect("provider");
+    let provider = OpenAiProvider::openai("gpt-4o".into()).expect("provider");
     let response = provider
         .complete("System", &[ChatMessage::User("Run both tools".into())], &[])
         .await
@@ -287,7 +287,7 @@ async fn complete_maps_cached_prompt_tokens_to_cache_read() {
         ),
     ]);
 
-    let provider = OpenAiProvider::new("gpt-4o".into()).expect("provider");
+    let provider = OpenAiProvider::openai("gpt-4o".into()).expect("provider");
     let response = provider
         .complete("System", &[ChatMessage::User("hello".into())], &[])
         .await
@@ -325,7 +325,7 @@ async fn complete_translates_assistant_tool_calls_and_tool_results_in_history() 
         ),
     ]);
 
-    let provider = OpenAiProvider::new("gpt-4o".into()).expect("provider");
+    let provider = OpenAiProvider::openai("gpt-4o".into()).expect("provider");
     provider
         .complete(
             "System",
@@ -395,10 +395,74 @@ async fn complete_translates_assistant_tool_calls_and_tool_results_in_history() 
 #[test]
 fn new_errors_when_api_key_missing() {
     let _env = EnvVarGuard::set("OPENAI_API_KEY", None);
-    let result = OpenAiProvider::new("gpt-4o".into());
+    let result = OpenAiProvider::openai("gpt-4o".into());
     assert!(result.is_err(), "expected missing API key to fail");
     assert_eq!(
         result.err().expect("error").to_string(),
         "OPENAI_API_KEY not set"
     );
+}
+
+#[tokio::test]
+async fn local_posts_to_resolved_base_url_without_api_key() {
+    let mock_server = MockServer::start().await;
+    let captured = Arc::new(Mutex::new(None::<Value>));
+    let captured_for_mock = Arc::clone(&captured);
+    let response_body = single_tool_call_response();
+
+    // The placeholder bearer ("local") is sent when no key is provided, and the
+    // request lands on the resolved base URL's /v1/chat/completions.
+    Mock::given(method("POST"))
+        .and(path("/v1/chat/completions"))
+        .and(header("authorization", "Bearer local"))
+        .respond_with(move |request: &Request| {
+            *captured_for_mock.lock().expect("capture lock") =
+                Some(serde_json::from_slice::<Value>(&request.body).expect("json body"));
+            ResponseTemplate::new(200).set_body_json(response_body.clone())
+        })
+        .mount(&mock_server)
+        .await;
+
+    // No OpenAI key/base env at all — the local provider must not depend on them.
+    let _env = EnvVarGuard::set_many(&[("OPENAI_API_KEY", None), ("OPENAI_BASE_URL", None)]);
+
+    let provider = OpenAiProvider::local(
+        "qwen3-coder-next".into(),
+        openai_base_url(&mock_server),
+        None,
+    )
+    .expect("local provider builds");
+    assert_eq!(provider.provider(), gantry::cli::Provider::Local);
+
+    let tools = [ToolSchema {
+        name: "get_weather".into(),
+        description: "Get weather for a city".into(),
+        json_schema: json!({
+            "type": "object",
+            "properties": { "city": { "type": "string" } },
+            "required": ["city"]
+        }),
+    }];
+
+    let response = provider
+        .complete(
+            "You are a helpful assistant.",
+            &[ChatMessage::User("What's the weather in Paris?".into())],
+            &tools,
+        )
+        .await
+        .expect("complete");
+
+    assert_eq!(response.tool_calls.len(), 1);
+    assert_eq!(response.tool_calls[0].name, "get_weather");
+    assert_eq!(response.tool_calls[0].args_json, r#"{"city":"Paris"}"#);
+    assert_eq!(response.input_tokens, 100);
+    assert_eq!(response.output_tokens, 25);
+
+    let body = captured
+        .lock()
+        .expect("capture lock")
+        .clone()
+        .expect("request body captured");
+    assert_eq!(body["model"], "qwen3-coder-next");
 }
