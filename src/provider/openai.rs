@@ -48,23 +48,8 @@ impl OpenAiProvider {
     pub fn openai(model: String) -> anyhow::Result<Self> {
         let api_key = std::env::var("OPENAI_API_KEY")
             .map_err(|_| anyhow::anyhow!("OPENAI_API_KEY not set"))?;
-
         let base_url = std::env::var("OPENAI_BASE_URL").ok();
-        let mut builder = openai::Client::builder().api_key(api_key);
-        if let Some(base_url) = &base_url {
-            builder = builder.base_url(base_url);
-        }
-
-        let client = builder
-            .build()
-            .map_err(|e| anyhow::anyhow!("failed to build OpenAI client: {e}"))?;
-
-        Ok(Self {
-            model,
-            client,
-            provider: Provider::OpenAi,
-            base_url,
-        })
+        Self::from_parts(model, Provider::OpenAi, api_key, base_url, HeaderMap::new())
     }
 
     /// Generic OpenAI-compatible local/self-hosted server (oMLX, Ollama, vLLM,
@@ -73,18 +58,13 @@ impl OpenAiProvider {
     /// bearer is sent when absent (the server ignores it when auth is off).
     pub fn local(model: String, base_url: String, api_key: Option<String>) -> anyhow::Result<Self> {
         let api_key = api_key.unwrap_or_else(|| PLACEHOLDER_API_KEY.to_string());
-        let client = openai::Client::builder()
-            .api_key(api_key)
-            .base_url(&base_url)
-            .build()
-            .map_err(|e| anyhow::anyhow!("failed to build local OpenAI-compatible client: {e}"))?;
-
-        Ok(Self {
+        Self::from_parts(
             model,
-            client,
-            provider: Provider::Local,
-            base_url: Some(base_url),
-        })
+            Provider::Local,
+            api_key,
+            Some(base_url),
+            HeaderMap::new(),
+        )
     }
 
     /// OpenRouter unified gateway (OpenAI wire-compatible). Requires
@@ -96,33 +76,51 @@ impl OpenAiProvider {
     pub fn openrouter(model: String) -> anyhow::Result<Self> {
         let api_key = std::env::var(OPENROUTER_API_KEY_ENV)
             .map_err(|_| anyhow::anyhow!("{OPENROUTER_API_KEY_ENV} not set"))?;
-
         let base_url = std::env::var(OPENROUTER_BASE_URL_ENV)
             .ok()
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
             .unwrap_or_else(|| OPENROUTER_DEFAULT_BASE_URL.to_string());
-
         let headers = openrouter_headers(
             std::env::var(OPENROUTER_REFERER_ENV).ok().as_deref(),
             std::env::var(OPENROUTER_TITLE_ENV).ok().as_deref(),
         )?;
+        Self::from_parts(
+            model,
+            Provider::OpenRouter,
+            api_key,
+            Some(base_url),
+            headers,
+        )
+    }
 
-        let mut builder = openai::Client::builder()
-            .api_key(api_key)
-            .base_url(&base_url);
+    /// Build an OpenAI-compatible client from already-resolved parts. The single
+    /// place that knows the rig builder mechanics (key, optional base URL,
+    /// optional default headers); each public constructor is pure env/argument
+    /// resolution on top of this. `base_url == None` uses rig's default OpenAI
+    /// endpoint; an empty `headers` map sends no extra headers.
+    fn from_parts(
+        model: String,
+        provider: Provider,
+        api_key: String,
+        base_url: Option<String>,
+        headers: HeaderMap,
+    ) -> anyhow::Result<Self> {
+        let mut builder = openai::Client::builder().api_key(api_key);
+        if let Some(base_url) = &base_url {
+            builder = builder.base_url(base_url);
+        }
         if !headers.is_empty() {
             builder = builder.http_headers(headers);
         }
         let client = builder
             .build()
-            .map_err(|e| anyhow::anyhow!("failed to build OpenRouter client: {e}"))?;
-
+            .map_err(|e| anyhow::anyhow!("failed to build {} client: {e}", provider.as_str()))?;
         Ok(Self {
             model,
             client,
-            provider: Provider::OpenRouter,
-            base_url: Some(base_url),
+            provider,
+            base_url,
         })
     }
 }
