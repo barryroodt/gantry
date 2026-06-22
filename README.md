@@ -143,6 +143,8 @@ gantry --mode single \
 
 `OPENROUTER_BASE_URL` overrides the default `https://openrouter.ai/api/v1` (e.g. to route through a compatible proxy).
 
+**Routers.** OpenRouter's [routers](https://openrouter.ai/docs/guides/routing) are addressed like models, so they ride the same path — the slug is `openrouter/openrouter/<router>` (e.g. `openrouter/openrouter/free`, `openrouter/openrouter/auto`, `openrouter/openrouter/fusion`). Two caveats for gantry's tool-driven modes (`single`/`team`/`loop` with tools): the router must support **function calling** — `openrouter/free` and `openrouter/auto` do; `openrouter/fusion` does **not** (it runs its own multi-model deliberation pipeline) and is paid, so it fits a tool-less single-shot prompt rather than the agentic loop. Free models — including the `openrouter/free` router — require enabling the data-training toggle in your [OpenRouter privacy settings](https://openrouter.ai/settings/privacy) and are rate-limited (~20 req/min, ~200 req/day).
+
 ## Modes
 
 - **`single`** — one agent runs a bounded tool loop (model call → tool dispatch → repeat) until it stops calling tools or hits the turn cap. The general-purpose path.
