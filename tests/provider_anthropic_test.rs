@@ -164,12 +164,68 @@ async fn complete_hits_messages_endpoint_and_maps_response() {
         .expect("request body captured");
 
     assert_eq!(request_body["model"], "claude-sonnet-4");
+    // The fix always sends a concrete `max_tokens` (never `None`, which makes
+    // rig hard-fail before the request leaves the process). A hosted id rig
+    // knows keeps its per-model cap (claude-sonnet-4 → 64000), not the
+    // local-server fallback.
+    assert_eq!(request_body["max_tokens"], 64000);
     assert_eq!(
         request_body["system"][0]["text"],
         "You are a helpful assistant."
     );
     assert_eq!(request_body["tools"][0]["name"], "search");
     assert!(request_body["messages"].is_array());
+}
+
+#[tokio::test]
+async fn complete_sends_fallback_max_tokens_for_unknown_model() {
+    // An Anthropic-compatible local server (e.g. oMLX) serves a custom model id
+    // rig's table doesn't know. Without a fallback rig hard-fails before
+    // sending ("`max_tokens` must be set for Anthropic"); the fix must put the
+    // fallback on the wire so the request actually goes out. Keep this value in
+    // sync with `LOCAL_ANTHROPIC_FALLBACK_MAX_TOKENS` in
+    // `src/provider/anthropic.rs`.
+    let mock_server = MockServer::start().await;
+    let captured = Arc::new(Mutex::new(None::<Value>));
+    let captured_for_mock = Arc::clone(&captured);
+    let response_body = anthropic_success_response();
+
+    Mock::given(method("POST"))
+        .and(path("/v1/messages"))
+        .and(header("x-api-key", "test-anthropic-key"))
+        .respond_with(move |request: &Request| {
+            let body = serde_json::from_slice::<Value>(&request.body)
+                .expect("request body should be valid JSON");
+            *captured_for_mock.lock().expect("capture lock") = Some(body);
+            ResponseTemplate::new(200).set_body_json(response_body.clone())
+        })
+        .mount(&mock_server)
+        .await;
+
+    let _env = EnvVarGuard::set_many(&[
+        ("ANTHROPIC_API_KEY", Some("test-anthropic-key")),
+        ("ANTHROPIC_API_BASE", Some(mock_server.uri().as_str())),
+    ]);
+
+    let provider = AnthropicProvider::new("local-custom-model".into()).expect("provider");
+    provider
+        .complete(
+            "You are a helpful assistant.",
+            &[ChatMessage::User("hi".into())],
+            &[],
+        )
+        .await
+        .expect("complete");
+
+    let request_body = captured
+        .lock()
+        .expect("capture lock")
+        .clone()
+        .expect("request body captured");
+
+    // Unknown id → the documented fallback, proving the fallback path reaches
+    // the wire (not just the `resolve_max_tokens` unit).
+    assert_eq!(request_body["max_tokens"], 8192);
 }
 
 #[tokio::test]
