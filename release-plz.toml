@@ -1,0 +1,25 @@
+# release-plz manages versioning, CHANGELOG.md, and git tags for this workspace.
+# It deliberately does NOT publish or create GitHub Releases:
+#   - publish = false: `gantry` depends on git deps (pi-*, patched brush-*), which
+#     makes it unpublishable to crates.io — `cargo publish` would always fail.
+#   - git_release_enable = false: .github/workflows/release.yml owns the GitHub
+#     Release (2-arch binaries + SHA256SUMS), triggered by the `v*` tag push.
+# So release-plz's sole outputs are the version-bump PR and, on its merge, the tag.
+[workspace]
+publish = false
+git_release_enable = false
+
+[[package]]
+name = "gantry"
+# Match the existing bare-`v` tag convention (v0.1.2, …) so the pushed tag triggers
+# release.yml (on: push tags: ["v*"]). Default would be `gantry-v{{ version }}`.
+git_tag_name = "v{{ version }}"
+
+# Internal workspace members: never versioned, tagged, or changelogged on their own.
+[[package]]
+name = "gantry-bench"
+release = false
+
+[[package]]
+name = "gantry-evals"
+release = false

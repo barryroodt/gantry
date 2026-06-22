@@ -1,0 +1,109 @@
+name: Release-plz
+
+# Automates the release lifecycle on top of the existing tag-driven build:
+#   release-pr — maintains the "chore: release vX.Y.Z" PR (version bump + CHANGELOG)
+#   release    — on that PR's merge to main, pushes the `vX.Y.Z` git tag
+#
+# The tag push is what builds + publishes binaries, via .github/workflows/release.yml
+# (on: push tags: ["v*"]). That downstream trigger ONLY fires because the tag is pushed
+# with a GitHub App token, NOT the default GITHUB_TOKEN — tags pushed by GITHUB_TOKEN
+# never trigger other workflows. release-plz config (publish/release ownership) lives
+# in release-plz.toml.
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-plz-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release-pr:
+    name: release-plz PR
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      # Actions are pinned to commit SHAs (not mutable tags); the trailing comment
+      # tracks the version for Dependabot. Mirrors ci.yml / release.yml policy.
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          # Full history: the changelog is computed from commits since the last tag.
+          fetch-depth: 0
+
+      # Short-lived, repo-scoped token from the release-plz GitHub App. A non-default
+      # token is REQUIRED so the pushed tag triggers release.yml (GITHUB_TOKEN would not).
+      - name: Mint GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.RELEASE_PLZ_APP_ID }}
+          private-key: ${{ secrets.RELEASE_PLZ_APP_KEY }}
+
+      # Single source of truth for the Rust version: read from mise.toml (ubuntu-latest
+      # is 24.04, whose system python3 has tomllib). Pinning cargo keeps the version-bump
+      # Cargo.lock update from re-resolving/reformatting under a newer runner toolchain.
+      - name: Read toolchain from mise.toml
+        id: rust
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import tomllib
+          t = tomllib.load(open("mise.toml", "rb"))["tools"]["rust"]
+          print(f"version={t['version']}")
+          PY
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master, pinned by SHA
+        with:
+          toolchain: ${{ steps.rust.outputs.version }}
+
+      - name: release-plz release-pr
+        uses: release-plz/action@e8792575c7f2366cf6ff3ccc33ead9ace5b691c7 # v0.5.130
+        with:
+          command: release-pr
+        env:
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+
+  release:
+    name: release-plz tag
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          fetch-depth: 0
+
+      - name: Mint GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.RELEASE_PLZ_APP_ID }}
+          private-key: ${{ secrets.RELEASE_PLZ_APP_KEY }}
+
+      - name: Read toolchain from mise.toml
+        id: rust
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import tomllib
+          t = tomllib.load(open("mise.toml", "rb"))["tools"]["rust"]
+          print(f"version={t['version']}")
+          PY
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master, pinned by SHA
+        with:
+          toolchain: ${{ steps.rust.outputs.version }}
+
+      - name: release-plz release
+        uses: release-plz/action@e8792575c7f2366cf6ff3ccc33ead9ace5b691c7 # v0.5.130
+        with:
+          command: release
+        env:
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
