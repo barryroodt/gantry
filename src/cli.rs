@@ -123,6 +123,10 @@ pub enum Provider {
     Anthropic,
     OpenAi,
     Gemini,
+    /// OpenRouter unified gateway (OpenAI wire-compatible). Model ids keep
+    /// their vendor prefix and are forwarded verbatim, e.g.
+    /// `openrouter/anthropic/claude-3.5-sonnet` → model `anthropic/claude-3.5-sonnet`.
+    OpenRouter,
     /// Generic OpenAI-compatible local/self-hosted server (e.g. oMLX, Ollama,
     /// vLLM, LM Studio). Endpoint via `--base-url`/`GANTRY_LOCAL_BASE_URL`.
     Local,
@@ -134,6 +138,7 @@ impl Provider {
             Self::Anthropic => "anthropic",
             Self::OpenAi => "openai",
             Self::Gemini => "google",
+            Self::OpenRouter => "openrouter",
             Self::Local => "local",
         }
     }
@@ -144,6 +149,7 @@ impl Provider {
             "anthropic" => Some(Self::Anthropic),
             "openai" => Some(Self::OpenAi),
             "google" => Some(Self::Gemini),
+            "openrouter" => Some(Self::OpenRouter),
             "local" => Some(Self::Local),
             _ => None,
         }

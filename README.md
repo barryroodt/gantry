@@ -82,7 +82,7 @@ Each line of stdout is one JSON event; the final `result` event carries the exit
 
 | Flag | Required | Description |
 |---|---|---|
-| `--model <provider/model>` | yes | Provider slug + model id, e.g. `anthropic/claude-opus-4-8`, `openai/gpt-4o`, `google/gemini-2.5-pro`, `local/qwen3-coder-next`. |
+| `--model <provider/model>` | yes | Provider slug + model id, e.g. `anthropic/claude-opus-4-8`, `openai/gpt-4o`, `google/gemini-2.5-pro`, `openrouter/anthropic/claude-3.5-sonnet`, `local/qwen3-coder-next`. |
 | `--workdir <dir>` | yes | Working directory; all file tools are confined to it. |
 | `--prompt-file <path>` | yes | The user prompt, read from a file. |
 | `--max-tokens <n>` | yes | Hard token budget (formula: `input + output + cache_write`; cache_read excluded). The run stops with exit `budget` if the running total meets or exceeds this value. |
@@ -108,6 +108,7 @@ Each line of stdout is one JSON event; the final `result` event carries the exit
 | Anthropic | `anthropic/` | `ANTHROPIC_API_KEY` | `ANTHROPIC_API_BASE` |
 | OpenAI | `openai/` | `OPENAI_API_KEY` | `OPENAI_BASE_URL` |
 | Gemini | `google/` | `GEMINI_API_KEY` | `GEMINI_API_BASE` |
+| OpenRouter | `openrouter/` | `OPENROUTER_API_KEY` | `OPENROUTER_BASE_URL` |
 | Local (OpenAI-compatible) | `local/` | `GANTRY_LOCAL_API_KEY` (optional) | `--base-url` / `GANTRY_LOCAL_BASE_URL` |
 
 Everything after the first `/` in `--model` is the bare model id forwarded to that provider. The base-URL overrides let you point at a proxy, gateway, or self-hosted endpoint.
@@ -123,6 +124,24 @@ gantry --mode single \
   --workdir . --prompt-file /tmp/task.md \
   --max-tokens 200000 --timeout-ms 600000
 ```
+
+#### OpenRouter
+
+[OpenRouter](https://openrouter.ai/) is an OpenAI-compatible gateway fronting many vendors behind one key. Set `OPENROUTER_API_KEY` and prefix the model with `openrouter/`. OpenRouter ids are vendor-qualified (`anthropic/claude-3.5-sonnet`, `meta-llama/llama-3.1-70b-instruct`); since only the first `/` splits provider from model, the rest is forwarded verbatim.
+
+```bash
+export OPENROUTER_API_KEY=sk-or-...
+# Optional attribution (OpenRouter leaderboard ranking only; not required):
+export OPENROUTER_HTTP_REFERER=https://your.app
+export OPENROUTER_X_TITLE="your app"
+
+gantry --mode single \
+  --model openrouter/anthropic/claude-3.5-sonnet \
+  --workdir . --prompt-file /tmp/task.md \
+  --max-tokens 200000 --timeout-ms 600000
+```
+
+`OPENROUTER_BASE_URL` overrides the default `https://openrouter.ai/api/v1` (e.g. to route through a compatible proxy).
 
 ## Modes
 
@@ -254,7 +273,7 @@ A thin binary (`src/main.rs`) parses + validates the CLI, emits `start`, runs th
 - `cli` — flag parsing, validation, provider-slug parsing, profile merge.
 - `mode` — `bootstrap` (shared run scaffolding) + `single`, `team`, `loop_mode`, `isolation`.
 - `tools` — the registry (visibility/dispatch), each tool, the workdir guard, and output compression.
-- `provider` — the `ProviderAdapter` trait + Anthropic/OpenAI/Gemini adapters over rig; the `local` provider reuses the OpenAI-compatible engine with a configurable base URL and optional key.
+- `provider` — the `ProviderAdapter` trait + Anthropic/OpenAI/Gemini adapters over rig; the `openrouter` and `local` providers reuse the OpenAI-compatible engine — OpenRouter on the fixed gateway base + key (plus optional attribution headers), `local` on a configurable base URL with an optional key.
 - `events` / `emitter` — the NDJSON event model and the stdout sink.
 - `meter` — token accounting + budget enforcement; `cancel` — timeout + signal handling.
 - `profile` — profile-directory loading; `skills` — skill resolution.

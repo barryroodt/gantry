@@ -39,6 +39,22 @@ fn build_adapter_gemini_requires_api_key() {
 }
 
 #[test]
+fn build_adapter_openrouter_requires_api_key() {
+    let _env = EnvVarGuard::set("OPENROUTER_API_KEY", None);
+    let result = build_adapter(
+        Provider::OpenRouter,
+        "anthropic/claude-3.5-sonnet".into(),
+        None,
+    );
+    assert!(result.is_err());
+    assert!(result
+        .err()
+        .expect("error")
+        .to_string()
+        .contains("OPENROUTER_API_KEY not set"));
+}
+
+#[test]
 fn build_adapter_local_needs_no_api_key() {
     // The local provider builds with no key env set; the --base-url flag (here
     // None → default) is the only local-specific input.
@@ -130,6 +146,14 @@ fn parse_slug_routes_provider_table() {
         ("google/gemini-1.5-pro", Provider::Gemini),
         ("local/qwen3-coder-next", Provider::Local),
         ("local/llama-3.3-70b", Provider::Local),
+        (
+            "openrouter/anthropic/claude-3.5-sonnet",
+            Provider::OpenRouter,
+        ),
+        (
+            "openrouter/meta-llama/llama-3.1-70b-instruct",
+            Provider::OpenRouter,
+        ),
     ];
 
     for (slug, expected) in cases {

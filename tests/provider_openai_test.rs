@@ -466,3 +466,93 @@ async fn local_posts_to_resolved_base_url_without_api_key() {
         .expect("request body captured");
     assert_eq!(body["model"], "qwen3-coder-next");
 }
+
+fn openrouter_text_response() -> Value {
+    json!({
+        "id": "chatcmpl-or",
+        "object": "chat.completion",
+        "created": 1_700_000_003,
+        "model": "anthropic/claude-3.5-sonnet",
+        "choices": [{
+            "index": 0,
+            "message": { "role": "assistant", "content": "GANTRY-OK" },
+            "finish_reason": "stop"
+        }],
+        "usage": {
+            "prompt_tokens": 12,
+            "completion_tokens": 3,
+            "total_tokens": 15
+        }
+    })
+}
+
+#[test]
+fn openrouter_errors_when_api_key_missing() {
+    let _env = EnvVarGuard::set("OPENROUTER_API_KEY", None);
+    let result = OpenAiProvider::openrouter("anthropic/claude-3.5-sonnet".into());
+    assert!(result.is_err(), "expected missing API key to fail");
+    assert_eq!(
+        result.err().expect("error").to_string(),
+        "OPENROUTER_API_KEY not set"
+    );
+}
+
+#[tokio::test]
+async fn openrouter_sends_attribution_headers_and_forwards_model() {
+    let mock_server = MockServer::start().await;
+    let captured = Arc::new(Mutex::new(None::<Value>));
+    let captured_for_mock = Arc::clone(&captured);
+    let response_body = openrouter_text_response();
+
+    // The bearer comes from OPENROUTER_API_KEY; the attribution headers come
+    // from OPENROUTER_HTTP_REFERER / OPENROUTER_X_TITLE. All three are header
+    // matchers, so the mock only responds if every one reached the wire.
+    Mock::given(method("POST"))
+        .and(path("/v1/chat/completions"))
+        .and(header("authorization", "Bearer test-or-key"))
+        .and(header("http-referer", "https://gantry.example"))
+        .and(header("x-title", "gantry"))
+        .respond_with(move |request: &Request| {
+            *captured_for_mock.lock().expect("capture lock") =
+                Some(serde_json::from_slice::<Value>(&request.body).expect("json body"));
+            ResponseTemplate::new(200).set_body_json(response_body.clone())
+        })
+        .mount(&mock_server)
+        .await;
+
+    let _env = EnvVarGuard::set_many(&[
+        ("OPENROUTER_API_KEY", Some("test-or-key")),
+        (
+            "OPENROUTER_BASE_URL",
+            Some(openai_base_url(&mock_server).as_str()),
+        ),
+        ("OPENROUTER_HTTP_REFERER", Some("https://gantry.example")),
+        ("OPENROUTER_X_TITLE", Some("gantry")),
+    ]);
+
+    // A vendor-prefixed OpenRouter id (contains a slash) must be forwarded
+    // verbatim in the request body.
+    let provider =
+        OpenAiProvider::openrouter("anthropic/claude-3.5-sonnet".into()).expect("provider builds");
+    assert_eq!(provider.provider(), gantry::cli::Provider::OpenRouter);
+
+    let response = provider
+        .complete(
+            "You are a helpful assistant.",
+            &[ChatMessage::User("ping".into())],
+            &[],
+        )
+        .await
+        .expect("complete");
+
+    assert_eq!(response.text, "GANTRY-OK");
+    assert_eq!(response.input_tokens, 12);
+    assert_eq!(response.output_tokens, 3);
+
+    let body = captured
+        .lock()
+        .expect("capture lock")
+        .clone()
+        .expect("request body captured");
+    assert_eq!(body["model"], "anthropic/claude-3.5-sonnet");
+}

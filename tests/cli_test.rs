@@ -59,6 +59,11 @@ fn parse_slug_routes_each_provider() {
             Provider::Local,
             "qwen3-coder-next",
         ),
+        (
+            "openrouter/anthropic/claude-3.5-sonnet",
+            Provider::OpenRouter,
+            "anthropic/claude-3.5-sonnet",
+        ),
     ];
 
     for (slug, provider, model) in cases {
@@ -75,6 +80,12 @@ fn parse_slug_splits_on_first_slash_only() {
     let (provider, model) = parse_model_slug("openai/ft:gpt-4o/acme").expect("slug parses");
     assert_eq!(provider, Provider::OpenAi);
     assert_eq!(model, "ft:gpt-4o/acme");
+
+    // OpenRouter ids carry a vendor prefix, so the model keeps its own slash.
+    let (provider, model) =
+        parse_model_slug("openrouter/anthropic/claude-3.5-sonnet").expect("slug parses");
+    assert_eq!(provider, Provider::OpenRouter);
+    assert_eq!(model, "anthropic/claude-3.5-sonnet");
 }
 
 #[test]

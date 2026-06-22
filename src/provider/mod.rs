@@ -139,6 +139,7 @@ pub fn build_adapter(
         Provider::Anthropic => Ok(Box::new(anthropic::AnthropicProvider::new(model)?)),
         Provider::OpenAi => Ok(Box::new(openai::OpenAiProvider::openai(model)?)),
         Provider::Gemini => Ok(Box::new(GeminiProvider::new(model)?)),
+        Provider::OpenRouter => Ok(Box::new(openai::OpenAiProvider::openrouter(model)?)),
         Provider::Local => {
             let base_url = resolve_local_base_url(base_url_flag.as_deref());
             let api_key = std::env::var(LOCAL_API_KEY_ENV).ok();

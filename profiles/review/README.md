@@ -27,6 +27,15 @@ gantry --profile profiles/review --mode single \
   --max-tokens <n> --timeout-ms <n>
 ```
 
+Via OpenRouter (any OpenAI-compatible vendor behind one key):
+
+```
+export OPENROUTER_API_KEY=sk-or-...
+gantry --profile profiles/review --mode single \
+  --model openrouter/anthropic/claude-3.5-sonnet --workdir <dir> --prompt-file <rendered.md> \
+  --max-tokens <n> --timeout-ms <n>
+```
+
 ## Notes
 - `--profile` sets mode, the system + subagent prompts, the tool allowlist, and
   inject-skills from `profile.toml`. **Explicit flags override profile values**
