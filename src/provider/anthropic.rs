@@ -18,6 +18,21 @@ use super::{
     ToolCallRequest, ToolSchema,
 };
 
+/// Per-request output-token cap sent to the Anthropic Messages API when rig's
+/// model table has no entry for the model id. rig REQUIRES `max_tokens` and
+/// derives it from a built-in table of hosted Claude ids; an
+/// Anthropic-compatible local server (e.g. oMLX) serving a custom id is not in
+/// that table, so without a fallback rig hard-fails before sending. 8192 is
+/// ample for agentic turns (mostly tool calls) while leaving context headroom
+/// on smaller local models.
+const LOCAL_ANTHROPIC_FALLBACK_MAX_TOKENS: u64 = 8192;
+
+/// Resolve the per-request `max_tokens`: rig's per-model value when known
+/// (hosted Claude behavior unchanged), else [`LOCAL_ANTHROPIC_FALLBACK_MAX_TOKENS`].
+fn resolve_max_tokens(model_default: Option<u64>) -> u64 {
+    model_default.unwrap_or(LOCAL_ANTHROPIC_FALLBACK_MAX_TOKENS)
+}
+
 pub struct AnthropicProvider {
     model: String,
     client: anthropic::Client,
@@ -90,6 +105,16 @@ impl AnthropicProvider {
                 .map_err(|_| anyhow::anyhow!("chat history must not be empty"))?
         };
 
+        let model = self.completion_model();
+        // rig REQUIRES `max_tokens` for Anthropic and derives it from its own
+        // per-model table (`default_max_tokens`), which only knows hosted
+        // Claude ids. An Anthropic-compatible local server (e.g. oMLX serving a
+        // custom id) yields `None`, and rig then hard-fails with "`max_tokens`
+        // must be set for Anthropic" before the request leaves the process.
+        // Use rig's per-model value when known (hosted behavior unchanged) and
+        // a conservative fallback otherwise.
+        let max_tokens = resolve_max_tokens(model.default_max_tokens);
+
         let request = CompletionRequest {
             model: None,
             preamble: Some(system.to_string()),
@@ -104,13 +129,12 @@ impl AnthropicProvider {
                 })
                 .collect(),
             temperature: None,
-            max_tokens: None,
+            max_tokens: Some(max_tokens),
             tool_choice: None,
             additional_params: None,
             output_schema: None,
         };
 
-        let model = self.completion_model();
         let response = model
             .completion(request)
             .await
@@ -144,5 +168,29 @@ impl AnthropicProvider {
             cache_read: response.usage.cached_input_tokens,
             cache_write: response.usage.cache_creation_input_tokens,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{resolve_max_tokens, LOCAL_ANTHROPIC_FALLBACK_MAX_TOKENS};
+
+    #[test]
+    fn known_model_keeps_rig_per_model_cap() {
+        // A hosted Claude id rig knows about must pass through untouched, so
+        // existing runs keep their model-specific output cap.
+        assert_eq!(resolve_max_tokens(Some(128_000)), 128_000);
+        assert_eq!(resolve_max_tokens(Some(64_000)), 64_000);
+    }
+
+    #[test]
+    fn unknown_model_uses_fallback_not_none() {
+        // A custom id from an Anthropic-compatible local server has no rig
+        // table entry; we must still send a concrete cap (never `None`, which
+        // makes rig hard-fail with "`max_tokens` must be set for Anthropic").
+        assert_eq!(
+            resolve_max_tokens(None),
+            LOCAL_ANTHROPIC_FALLBACK_MAX_TOKENS
+        );
     }
 }
