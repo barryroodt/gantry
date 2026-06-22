@@ -1219,6 +1219,7 @@ dependencies = [
  "futures-util",
  "gantry-evals",
  "globwalk",
+ "http",
  "pi-ast",
  "pi-iso",
  "pi-shell",

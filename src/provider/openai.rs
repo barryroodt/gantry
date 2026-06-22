@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use http::{HeaderMap, HeaderName, HeaderValue};
 use rig_core::{
     client::CompletionClient,
     completion::{self, CompletionModel},
@@ -26,28 +27,29 @@ pub struct OpenAiProvider {
 /// don't enforce auth ignore it.
 const PLACEHOLDER_API_KEY: &str = "local";
 
+/// OpenRouter unified-gateway base URL. Includes `/v1` because rig's OpenAI
+/// client appends `/chat/completions`. Override with [`OPENROUTER_BASE_URL_ENV`]
+/// to route through a compatible proxy.
+const OPENROUTER_DEFAULT_BASE_URL: &str = "https://openrouter.ai/api/v1";
+
+/// Env var overriding the OpenRouter endpoint (mirrors `OPENAI_BASE_URL`).
+const OPENROUTER_BASE_URL_ENV: &str = "OPENROUTER_BASE_URL";
+
+/// Required API-key env var for the OpenRouter provider.
+const OPENROUTER_API_KEY_ENV: &str = "OPENROUTER_API_KEY";
+
+/// Optional attribution headers — used only for OpenRouter's public-leaderboard
+/// ranking, never required for requests, tool calls, or usage accounting.
+const OPENROUTER_REFERER_ENV: &str = "OPENROUTER_HTTP_REFERER";
+const OPENROUTER_TITLE_ENV: &str = "OPENROUTER_X_TITLE";
+
 impl OpenAiProvider {
     /// Hosted OpenAI: requires `OPENAI_API_KEY`, honors `OPENAI_BASE_URL`.
     pub fn openai(model: String) -> anyhow::Result<Self> {
         let api_key = std::env::var("OPENAI_API_KEY")
             .map_err(|_| anyhow::anyhow!("OPENAI_API_KEY not set"))?;
-
         let base_url = std::env::var("OPENAI_BASE_URL").ok();
-        let mut builder = openai::Client::builder().api_key(api_key);
-        if let Some(base_url) = &base_url {
-            builder = builder.base_url(base_url);
-        }
-
-        let client = builder
-            .build()
-            .map_err(|e| anyhow::anyhow!("failed to build OpenAI client: {e}"))?;
-
-        Ok(Self {
-            model,
-            client,
-            provider: Provider::OpenAi,
-            base_url,
-        })
+        Self::from_parts(model, Provider::OpenAi, api_key, base_url, HeaderMap::new())
     }
 
     /// Generic OpenAI-compatible local/self-hosted server (oMLX, Ollama, vLLM,
@@ -56,19 +58,90 @@ impl OpenAiProvider {
     /// bearer is sent when absent (the server ignores it when auth is off).
     pub fn local(model: String, base_url: String, api_key: Option<String>) -> anyhow::Result<Self> {
         let api_key = api_key.unwrap_or_else(|| PLACEHOLDER_API_KEY.to_string());
-        let client = openai::Client::builder()
-            .api_key(api_key)
-            .base_url(&base_url)
-            .build()
-            .map_err(|e| anyhow::anyhow!("failed to build local OpenAI-compatible client: {e}"))?;
+        Self::from_parts(
+            model,
+            Provider::Local,
+            api_key,
+            Some(base_url),
+            HeaderMap::new(),
+        )
+    }
 
+    /// OpenRouter unified gateway (OpenAI wire-compatible). Requires
+    /// `OPENROUTER_API_KEY`; honors `OPENROUTER_BASE_URL`. Model ids keep their
+    /// vendor prefix and are forwarded verbatim (e.g.
+    /// `anthropic/claude-3.5-sonnet`). When `OPENROUTER_HTTP_REFERER` /
+    /// `OPENROUTER_X_TITLE` are set, their `HTTP-Referer`/`X-Title` attribution
+    /// headers are attached (leaderboard ranking only).
+    pub fn openrouter(model: String) -> anyhow::Result<Self> {
+        let api_key = std::env::var(OPENROUTER_API_KEY_ENV)
+            .map_err(|_| anyhow::anyhow!("{OPENROUTER_API_KEY_ENV} not set"))?;
+        let base_url = std::env::var(OPENROUTER_BASE_URL_ENV)
+            .ok()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| OPENROUTER_DEFAULT_BASE_URL.to_string());
+        let headers = openrouter_headers(
+            std::env::var(OPENROUTER_REFERER_ENV).ok().as_deref(),
+            std::env::var(OPENROUTER_TITLE_ENV).ok().as_deref(),
+        )?;
+        Self::from_parts(
+            model,
+            Provider::OpenRouter,
+            api_key,
+            Some(base_url),
+            headers,
+        )
+    }
+
+    /// Build an OpenAI-compatible client from already-resolved parts. The single
+    /// place that knows the rig builder mechanics (key, optional base URL,
+    /// optional default headers); each public constructor is pure env/argument
+    /// resolution on top of this. `base_url == None` uses rig's default OpenAI
+    /// endpoint; an empty `headers` map sends no extra headers.
+    fn from_parts(
+        model: String,
+        provider: Provider,
+        api_key: String,
+        base_url: Option<String>,
+        headers: HeaderMap,
+    ) -> anyhow::Result<Self> {
+        let mut builder = openai::Client::builder().api_key(api_key);
+        if let Some(base_url) = &base_url {
+            builder = builder.base_url(base_url);
+        }
+        if !headers.is_empty() {
+            builder = builder.http_headers(headers);
+        }
+        let client = builder
+            .build()
+            .map_err(|e| anyhow::anyhow!("failed to build {} client: {e}", provider.as_str()))?;
         Ok(Self {
             model,
             client,
-            provider: Provider::Local,
-            base_url: Some(base_url),
+            provider,
+            base_url,
         })
     }
+}
+
+/// Build OpenRouter's optional attribution headers. `HTTP-Referer` and
+/// `X-Title` are added only when the corresponding value is present and
+/// non-blank; absent/blank inputs yield an empty map (no headers sent).
+fn openrouter_headers(referer: Option<&str>, title: Option<&str>) -> anyhow::Result<HeaderMap> {
+    let mut headers = HeaderMap::new();
+    for (name, value, env) in [
+        ("http-referer", referer, OPENROUTER_REFERER_ENV),
+        ("x-title", title, OPENROUTER_TITLE_ENV),
+    ] {
+        let Some(value) = value.map(str::trim).filter(|s| !s.is_empty()) else {
+            continue;
+        };
+        let value = HeaderValue::from_str(value)
+            .map_err(|e| anyhow::anyhow!("invalid {env} value: {e}"))?;
+        headers.insert(HeaderName::from_static(name), value);
+    }
+    Ok(headers)
 }
 
 fn chat_messages_to_rig(messages: &[ChatMessage]) -> anyhow::Result<Vec<completion::Message>> {
@@ -322,5 +395,47 @@ mod local_error_tests {
         let msg = wrapped.to_string();
         assert!(msg.contains("http://localhost:8000/v1"));
         assert!(msg.contains("is it running?"));
+    }
+}
+
+#[cfg(test)]
+mod openrouter_header_tests {
+    use super::*;
+
+    #[test]
+    fn builds_both_attribution_headers_when_present() {
+        let headers =
+            openrouter_headers(Some("https://gantry.example"), Some("gantry")).expect("headers");
+        assert_eq!(headers.len(), 2);
+        assert_eq!(headers["http-referer"], "https://gantry.example");
+        assert_eq!(headers["x-title"], "gantry");
+    }
+
+    #[test]
+    fn includes_only_the_provided_header() {
+        let referer_only = openrouter_headers(Some("https://gantry.example"), None).expect("ok");
+        assert_eq!(referer_only.len(), 1);
+        assert!(referer_only.contains_key("http-referer"));
+        assert!(!referer_only.contains_key("x-title"));
+
+        let title_only = openrouter_headers(None, Some("gantry")).expect("ok");
+        assert_eq!(title_only.len(), 1);
+        assert!(title_only.contains_key("x-title"));
+    }
+
+    #[test]
+    fn absent_or_blank_values_yield_no_headers() {
+        assert!(openrouter_headers(None, None).expect("ok").is_empty());
+        // Whitespace-only values are treated as unset, not sent as blank headers.
+        assert!(openrouter_headers(Some("   "), Some(""))
+            .expect("ok")
+            .is_empty());
+    }
+
+    #[test]
+    fn rejects_a_value_that_is_not_a_valid_header() {
+        // A newline cannot be encoded as a header value.
+        let err = openrouter_headers(Some("bad\nvalue"), None).expect_err("should reject");
+        assert!(err.to_string().contains("OPENROUTER_HTTP_REFERER"));
     }
 }
