@@ -12,6 +12,11 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 [package]
 name = "gantry"
 version = "0.1.2"
+# Unpublishable to crates.io: the git deps below (pi-*, patched brush-*) are not
+# on any registry, so `cargo publish` can never succeed. Marking it here (not just
+# in release-plz.toml) also stops release-plz from baselining against the unrelated
+# public `gantry` crate on crates.io — it uses our git tags instead.
+publish = false
 edition = "2021"
 rust-version = "1.96"
 description = "A standalone, headless LLM agent harness driven over the CLI with a structured NDJSON event stream — single, team, and iterative-loop modes, sandboxed tools, and optional copy-on-write workspace isolation."
