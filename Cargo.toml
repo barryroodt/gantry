@@ -36,7 +36,7 @@ path = "src/main.rs"
 
 [dependencies]
 async-trait = "0.1"
-rig-core = "0.38"
+rig-core = "0.39"
 tokio = { version = "1", features = ["full"] }
 serde.workspace = true
 serde_json.workspace = true
@@ -57,7 +57,7 @@ pi-iso = { git = "https://github.com/can1357/oh-my-pi", rev = "8b619a2" }
 
 [dev-dependencies]
 gantry-evals = { path = "evals" }
-rig-core = "0.38"
+rig-core = "0.39"
 tempfile = "3"
 wiremock = "0.6"
 
