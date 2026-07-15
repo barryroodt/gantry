@@ -27,7 +27,7 @@ jobs:
       # source other than crates.io + our allow-listed git dep (policy in deny.toml).
       # Runs first so a bad dependency short-circuits before the expensive build.
       - name: Supply-chain audit (cargo-deny)
-        uses: EmbarkStudios/cargo-deny-action@bb137d7af7e4fb67e5f82a49c4fce4fad40782fe # v2.0.20
+        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
         with:
           command: check
           command-arguments: advisories bans sources
